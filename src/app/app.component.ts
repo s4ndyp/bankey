@@ -12,7 +12,7 @@ interface Transaction {
   category: string;
   accountNumber?: string;
   currentBalance?: number; // Veld: Saldo na transactie
-  tags?: string[]; // NIEUW: Tags
+  tags?: string[]; // Tags
 }
 
 interface CsvMapping {
@@ -438,6 +438,19 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     </div>
                 </div>
             </div>
+            
+             <!-- Gevaarzone (NIEUW: Wisknop) -->
+            <div class="bg-red-900/30 p-6 rounded-xl border border-red-700 shadow-lg mt-8">
+                <h3 class="text-xl font-semibold text-red-300 mb-2">Gevaarzone</h3>
+                <p class="text-red-400 text-sm mb-4">
+                    Deze actie kan niet ongedaan worden gemaakt.
+                </p>
+                <button (click)="deleteAllTransactions()" 
+                        class="bg-red-700 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    Alle Transacties Wissen
+                </button>
+            </div>
         </div>
 
 
@@ -496,12 +509,18 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 <option *ngFor="let acc of uniqueAccountNumbers()" [value]="acc">{{ getAccountName(acc) }}</option>
             </select>
             
-            <div class="relative col-span-2 md:col-span-1">
-                <input type="date" [ngModel]="dateFromFilter()" (ngModelChange)="dateFromFilter.set($event)" placeholder="Datum Vanaf" class="w-full bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
+            <!-- AANGEPAST: Datumfilters op één rij, nemen nu 2 kolommen in beslag. -->
+            <div class="col-span-2 md:col-span-2 grid grid-cols-2 gap-4">
+                <div class="relative">
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Vanaf</label>
+                    <input type="date" [ngModel]="dateFromFilter()" (ngModelChange)="dateFromFilter.set($event)" placeholder="Datum Vanaf" class="w-full bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
+                </div>
+                <div class="relative">
+                    <label class="block text-xs font-medium text-gray-400 mb-1">Tot</label>
+                    <input type="date" [ngModel]="dateToFilter()" (ngModelChange)="dateToFilter.set($event)" placeholder="Datum Tot" class="w-full bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
+                </div>
             </div>
-             <div class="relative col-span-2 md:col-span-1">
-                <input type="date" [ngModel]="dateToFilter()" (ngModelChange)="dateToFilter.set($event)" placeholder="Datum Tot" class="w-full bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
-            </div>
+            <!-- EINDE AANPASSING -->
           </div>
 
           <!-- List -->
@@ -540,10 +559,12 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     </td>
                     <td class="p-3 text-right font-mono font-bold" 
                         [ngClass]="t.type === 'income' ? 'text-green-400' : 'text-red-400'">
-                      {{ (t.type === 'income' ? '+' : '-') }} {{ t.amount | currency:'EUR':'symbol':'1.2-2' }}
+                      <!-- Gebruik van '1.2-2' Pipe voor vaste 2 decimalen, en forceer NL-notatie (komma) -->
+                      {{ (t.type === 'income' ? '+' : '-') }} {{ t.amount | currency:'EUR':'symbol':'1.2-2':'nl' }}
                     </td>
                     <td class="p-3 text-right font-mono text-gray-400 text-xs">
-                      {{ t.currentBalance ? (t.currentBalance | currency:'EUR':'symbol':'1.2-2') : '-' }}
+                      <!-- Gebruik van '1.2-2' Pipe voor vaste 2 decimalen, en forceer NL-notatie (komma) -->
+                      {{ t.currentBalance ? (t.currentBalance | currency:'EUR':'symbol':'1.2-2':'nl') : '-' }}
                     </td>
                     <td class="p-3 text-right">
                       <div class="flex justify-end gap-2 opacity-100 transition-opacity whitespace-nowrap">
@@ -1058,6 +1079,15 @@ export class App {
       // Update manual list
       this.manualCategories.update(cats => cats.map(cat => cat === oldCat ? newCat : cat).filter(c => c !== oldCat));
   }
+  
+  // NIEUW: Knop om alle transacties te wissen
+  deleteAllTransactions() {
+      if (confirm("WEES VOORZICHTIG! Weet je zeker dat je ALLE transacties permanent wilt verwijderen? Dit kan niet ongedaan gemaakt worden.")) {
+          this.transactions.set([]);
+          alert("Alle transacties zijn gewist.");
+      }
+  }
+
 
   // --- AUTOMATIC CATEGORIZATION RULES ---
   
@@ -1585,46 +1615,38 @@ export class App {
       alert(`${filteredIds.length} transacties bijgewerkt.`);
   }
 
-  // Helper: Smart Parse number
+  // Helper: Smart Parse number (AANGEPAST voor Nederlandse notatie)
   parseSmartNumber(amountStr: string): number {
       if (!amountStr) return 0;
-      amountStr = amountStr.trim();
+      amountStr = amountStr.trim().replace('€', '').replace('EUR', '');
       
-      // Stap 1: Bepaal of de laatste scheidingsteken een komma of een punt is
+      // Controle op punt als duizendtal scheidingsteken en komma als decimaal scheidingsteken
       const lastComma = amountStr.lastIndexOf(',');
       const lastDot = amountStr.lastIndexOf('.');
 
-      // De scheidingsteken die het laatst voorkomt, is waarschijnlijk de decimaal
       let cleanStr: string;
       if (lastComma > lastDot) {
-          // Nederlandse notatie (1.234,56). Verwijder punten, vervang komma door punt.
+          // Nederlandse notatie (1.234,56): Verwijder alle punten (duizendtal), vervang komma door punt.
           cleanStr = amountStr.replace(/\./g, '').replace(',', '.');
-      } else if (lastDot > lastComma) {
-          // Engelse notatie (1,234.56). Verwijder komma's, behoud punt.
-          cleanStr = amountStr.replace(/,/g, '');
       } else {
-          // Geen scheidingstekens of beide op dezelfde plek (wat vreemd is). Stript alles behalve cijfers/punt/min.
-          cleanStr = amountStr.replace(/[^0-9.-]/g, '');
+          // Engelse notatie (1,234.56) of geen duidelijke scheiding: Verwijder alle komma's, behoud punt.
+          cleanStr = amountStr.replace(/,/g, '');
       }
 
-      // Strippen van overige tekens (valuta, spaties) en extra punten/komma's.
-      // Zorg ervoor dat alleen het laatste punt (decimaal) overblijft.
-      cleanStr = cleanStr.replace(/[^\d.-]/g, ''); // Alleen cijfers, punt en min
+      // Strippen van overige tekens (spaties)
+      cleanStr = cleanStr.replace(/[^\d.-]/g, ''); 
       
-      // Controle op lege string na schoonmaken (geeft 0 terug)
       if (cleanStr === '' || cleanStr === '.') return 0;
       
       const amount = parseFloat(cleanStr);
       
-      // Vorig probleem: Als parseFloat faalt op een geldige string (bijv. "10."), wordt 0 teruggegeven en de error getriggerd.
-      // We triggeren de error nu alleen als de originele string niet leeg was en het resultaat ongeldig is.
       if (isNaN(amount) && amountStr !== '') {
-         // Trigger de error die in de console wordt gelogd (zodat de regel wordt overgeslagen).
          throw new Error('Invalid Amount');
       }
       
       return isNaN(amount) ? 0 : amount;
   }
+
 
   // CSV Import
   handleCsvFile(event: any) {
@@ -1663,7 +1685,7 @@ export class App {
           }
 
           try {
-              // Geen validatie meer hier. De parser gooit zelf een error op als het echt niet lukt.
+              // Gebruikt de verbeterde parseSmartNumber voor Nederlandse notatie
               let amount = this.parseSmartNumber(row[amountCol]);
               
               let dateRaw = row[dateCol];
@@ -1718,7 +1740,7 @@ export class App {
       alert(`${newTxs.length} transacties geïmporteerd. (${skipped} overgeslagen)`);
   }
 
-  // NIEUW: CSV Export van gefilterde data (Suggestie 10)
+  // CSV Export van gefilterde data
   exportFilteredCsv() {
     const data = this.filteredTransactions();
     if (data.length === 0) {
@@ -1728,17 +1750,18 @@ export class App {
 
     const headers = ["Datum", "Rekening", "Omschrijving", "Bedrag", "Type", "Categorie", "Saldo", "Tags"];
     
-    // Convert data to CSV rows
+    // Convert data to CSV rows (Zorgt voor NL-notatie met komma in CSV)
     const csvRows = data.map(t => [
         t.date,
         t.accountNumber || '',
         `"${t.description.replace(/"/g, '""')}"`, // Handle quotes in description
+        // Forceer komma als decimaal in export (toFixed is met punt, dus vervang punt door komma)
         t.type === 'expense' ? `-${t.amount.toFixed(2).replace('.', ',')}` : t.amount.toFixed(2).replace('.', ','),
         t.type,
         t.category,
         t.currentBalance !== undefined ? t.currentBalance.toFixed(2).replace('.', ',') : '',
         t.tags?.join('|') || ''
-    ].join(';')); // Use semicolon for better NL compatibility
+    ].join(';')); // Gebruik puntkomma voor betere NL compatibiliteit
 
     const csvContent = headers.join(';') + '\n' + csvRows.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -1776,7 +1799,7 @@ export class App {
       }
   }
 
-  // NIEUW: Handler voor Tags input om complexe logica uit template te halen
+  // Handler voor Tags input om complexe logica uit template te halen
   handleTagInput(value: string) {
       if (typeof value !== 'string') {
           this.currentTransaction.tags = [];
