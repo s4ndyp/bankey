@@ -92,14 +92,29 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
 
           <!-- Pivot Table -->
           <div class="bg-gray-800 rounded-xl border border-gray-700 shadow-xl overflow-hidden">
-            <div class="p-6 border-b border-gray-700">
-              <h3 class="text-lg font-semibold text-white">Categorie Overzicht (Laatste 6 maanden)</h3>
+            <div class="p-6 border-b border-gray-700 flex flex-col sm:flex-row justify-between items-center gap-4">
+              <h3 class="text-lg font-semibold text-white">Categorie Overzicht</h3>
+              
+              <!-- Dashboard Navigation Controls -->
+              <div class="flex items-center bg-gray-900 rounded-lg p-1 border border-gray-700">
+                <button (click)="moveDashboard(-1)" class="p-2 hover:bg-gray-800 rounded-md text-gray-400 hover:text-white transition-colors">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
+                </button>
+                <span class="px-4 text-sm font-mono font-medium text-gray-300 border-x border-gray-800 min-w-[140px] text-center">
+                  {{ matrixData().months[5] | date:'MMM yyyy' }} - {{ matrixData().months[0] | date:'MMM yyyy' }}
+                </span>
+                <button (click)="moveDashboard(1)" class="p-2 hover:bg-gray-800 rounded-md text-gray-400 hover:text-white transition-colors">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                </button>
+              </div>
             </div>
+            
             <div class="overflow-x-auto">
               <table class="w-full text-left text-sm whitespace-nowrap">
                 <thead>
                   <tr class="bg-gray-900/50 text-gray-400 border-b border-gray-700">
                     <th class="p-4 font-medium sticky left-0 bg-gray-900 z-10 border-r border-gray-700">Categorie</th>
+                    <!-- Months are generated reverse chronologically in matrixData logic -->
                     <th *ngFor="let m of matrixData().months" class="p-4 font-medium text-right min-w-[100px]">
                       {{ m | date:'MMM yy' }}
                     </th>
@@ -270,7 +285,6 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-sm">
             <div class="relative">
                <svg class="absolute left-3 top-3 h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-               <!-- FIXED: Using [ngModel] and (ngModelChange) with signals -->
                <input 
                 type="text" 
                 placeholder="Zoek op omschrijving..." 
@@ -319,7 +333,6 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     </td>
                     <td class="p-4 text-right">
                       <div class="flex justify-end gap-2 opacity-100 transition-opacity">
-                         <!-- FIXED: Renamed editTransaction to openModal -->
                          <button (click)="$event.stopPropagation(); openModal(t)" class="p-1 hover:bg-blue-900/50 rounded text-blue-400 cursor-pointer" title="Bewerken">
                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                          </button>
@@ -589,6 +602,9 @@ export class App {
   // Data
   transactions = signal<Transaction[]>([]);
   
+  // Dashboard Navigation State (new)
+  dashboardMonthOffset = signal(0);
+  
   // Transaction List Filters (Now Signals!)
   searchTerm = signal('');
   categoryFilter = signal('ALL');
@@ -624,10 +640,8 @@ export class App {
 
   // --- COMPUTES ---
 
-  // Main Filter Logic (Updated to use signals correctly)
+  // Main Filter Logic
   filteredTransactions = computed(() => {
-    // We read signals here: this.searchTerm(), this.categoryFilter(), etc.
-    // Because we read them, Angular knows to re-run this function when they change.
     const term = this.searchTerm().toLowerCase();
     const catFilter = this.categoryFilter();
     const tFilter = this.typeFilter();
@@ -652,6 +666,8 @@ export class App {
   // Top Cards Stats
   totalStats = computed(() => {
     const now = new Date();
+    // Offset applied here? Probably not necessary for Total Stats (usually YTD)
+    // But let's stick to standard YTD
     const currentYear = now.getFullYear();
     const txs = this.transactions().filter(t => new Date(t.date).getFullYear() === currentYear);
     const income = txs.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
@@ -659,13 +675,18 @@ export class App {
     return { income, expense, balance: income - expense };
   });
 
-  // Matrix Data
+  // Matrix Data (Updated for Navigation)
   matrixData = computed(() => {
     const data = this.transactions();
-    const today = new Date();
+    const offset = this.dashboardMonthOffset();
+    const baseDate = new Date(); // Today
+    
+    // Adjust base date by offset
+    baseDate.setMonth(baseDate.getMonth() + offset);
+
     const months: string[] = [];
     for (let i = 5; i >= 0; i--) {
-      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const d = new Date(baseDate.getFullYear(), baseDate.getMonth() - i, 1);
       months.push(d.toISOString().slice(0, 7));
     }
     const activeCategories = new Set<string>();
@@ -801,6 +822,11 @@ export class App {
 
   // --- ACTIONS ---
 
+  // Dashboard Nav
+  moveDashboard(delta: number) {
+    this.dashboardMonthOffset.update(v => v + delta);
+  }
+
   // Bulk Edit
   openBulkEdit() {
       this.bulkEditCategory = '';
@@ -862,34 +888,59 @@ export class App {
       const newTxs: Transaction[] = [];
       let skipped = 0;
 
-      dataRows.forEach(row => {
-          if (row.length < Math.max(dateCol, descCol, amountCol)) return;
+      dataRows.forEach((row, index) => {
+          if (row.length < Math.max(dateCol, descCol, amountCol)) {
+             console.warn(`Row ${index} incomplete`, row);
+             return;
+          }
 
           try {
               let amountStr = row[amountCol];
               amountStr = amountStr.replace(/\./g, '').replace(',', '.');
               let amount = parseFloat(amountStr);
               
-              if (isNaN(amount)) { skipped++; return; }
+              if (isNaN(amount)) { 
+                console.warn(`Row ${index} invalid amount`, row[amountCol]);
+                skipped++; 
+                return; 
+              }
 
               let dateRaw = row[dateCol];
-              let date = new Date(dateRaw).toISOString().slice(0, 10);
-              if (dateRaw.includes('-') && dateRaw.split('-')[0].length === 2) {
-                   const parts = dateRaw.split('-');
-                   date = `${parts[2]}-${parts[1]}-${parts[0]}`;
+              let dateStr = '';
+              
+              // Robust Date Parsing
+              if (dateRaw.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                  // ISO already: YYYY-MM-DD
+                  dateStr = dateRaw;
+              } else if (dateRaw.match(/^\d{1,2}-\d{1,2}-\d{4}$/)) {
+                  // NL: DD-MM-YYYY
+                  const parts = dateRaw.split('-');
+                  dateStr = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+              } else if (dateRaw.match(/^\d{8}$/)) {
+                  // Compact: YYYYMMDD
+                  dateStr = `${dateRaw.slice(0,4)}-${dateRaw.slice(4,6)}-${dateRaw.slice(6,8)}`;
+              } else {
+                 // Try generic
+                 const tryDate = new Date(dateRaw);
+                 if (!isNaN(tryDate.getTime())) {
+                   dateStr = tryDate.toISOString().slice(0, 10);
+                 } else {
+                   throw new Error('Invalid Date format');
+                 }
               }
 
               const type = amount >= 0 ? 'income' : 'expense';
 
               newTxs.push({
-                  id: crypto.randomUUID(),
-                  date: date,
+                  id: crypto.randomUUID(), // CRUCIAL for deletion
+                  date: dateStr,
                   description: row[descCol],
                   amount: Math.abs(amount),
                   type: type,
                   category: 'Onbekend' 
               });
           } catch (e) {
+              console.error(`Row ${index} error:`, e);
               skipped++;
           }
       });
@@ -916,7 +967,18 @@ export class App {
     }
     this.closeModal();
   }
-  deleteTransaction(id: string) { if(confirm('Verwijderen?')) this.transactions.update(items => items.filter(t => t.id !== id)); }
+  
+  deleteTransaction(id: string) { 
+    if (!id) {
+      alert('Fout: Kan deze transactie niet verwijderen (geen ID). Probeer de data opnieuw te importeren.');
+      return;
+    }
+    // Simple confirm
+    if(confirm('Weet je zeker dat je deze transactie wilt verwijderen?')) {
+      this.transactions.update(items => items.filter(t => t.id !== id));
+    }
+  }
+
   getEmptyTransaction(): Transaction { return { id: '', date: new Date().toISOString().slice(0, 10), description: '', amount: 0, type: 'expense', category: 'Algemeen' }; }
   
   // Matrix Helpers
@@ -927,7 +989,7 @@ export class App {
     const months = this.matrixData().months;
     return this.transactions().filter(t => t.category === category && months.includes(t.date.slice(0, 7))).reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
   }
-  // NEW: Total per Month Helper
+  // Total per Month Helper
   getMonthTotal(month: string): number {
     return this.transactions()
       .filter(t => t.date.startsWith(month))
