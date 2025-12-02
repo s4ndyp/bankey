@@ -3,6 +3,7 @@ import { CommonModule, DatePipe, CurrencyPipe, DecimalPipe } from '@angular/comm
 import { FormsModule } from '@angular/forms';
 
 // --- Interfaces ---
+
 interface ApiConfig {
     url: string; // Bijv. 'http://andere-server:8080'
     token: string;
@@ -10,12 +11,20 @@ interface ApiConfig {
     endpointName: string; // NIEUW: Naam van het unieke dashboard endpoint
 }
 
+// OPGELOST: ConfigBase type is nu string om conflicten met Transaction['type'] op te lossen.
+interface ConfigBase {
+    id: string;
+    type: string; 
+    subType: string;
+}
+
 interface Transaction {
   id: string; // MongoDB ObjectId
   date: string; // ISO format YYYY-MM-DD
   description: string;
   amount: number;
-  type: 'income' | 'expense';
+  // OPGELOST: Type is nog steeds beperkt, maar dit is het "echte" data type.
+  type: 'income' | 'expense'; 
   category: string;
   accountNumber?: string;
   currentBalance?: number; // Veld: Saldo na transactie
@@ -31,16 +40,11 @@ interface CsvMapping {
   balanceCol?: number;
 }
 
-// OPGELOST: Interfaces voor configuratie-objecten uitgebreid met de verplichte 'id', 'type' en 'subType' velden.
-interface ConfigBase {
-    id: string;
-    type: 'config' | 'transaction'; // 'transaction' wordt alleen intern gebruikt voor consistentie met saveItem
-}
-
+// OPGELOST: CsvMappingTemplate erft van ConfigBase en CsvMapping
 interface CsvMappingTemplate extends CsvMapping, ConfigBase {
   name: string;
   type: 'config'; 
-  subType: 'mapping_template'; // Unieke subType
+  subType: 'mapping_template';
 }
 
 interface CategorizationRule extends ConfigBase {
@@ -70,10 +74,9 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
 // --- API Service Logic ---
 class ApiService {
     private config: ApiConfig = { url: '', token: '', endpointName: 'finance-data' };
-    // NIEUW: De base URL wordt nu dynamisch samengesteld
     private apiBaseUrl = ''; 
     private transactionType = 'transaction';
-    private configType = 'config'; // Generieke type voor alle configuratie
+    private configType = 'config';
 
     constructor(initialConfig: ApiConfig) {
         this.config = initialConfig;
@@ -82,7 +85,6 @@ class ApiService {
 
     private updateBaseUrl() {
         if (this.config.url && this.config.endpointName) {
-            // Gebruikt de ingevoerde endpoint naam
             this.apiBaseUrl = `${this.config.url}/api/${this.config.endpointName}`; 
         } else {
             this.apiBaseUrl = '';
@@ -92,7 +94,6 @@ class ApiService {
     public updateConfig(newConfig: ApiConfig) {
         this.config = newConfig;
         this.updateBaseUrl();
-        // Opslaan in localStorage voor persistentie tussen sessies
         localStorage.setItem('apiConfig', JSON.stringify(newConfig));
     }
     
@@ -108,10 +109,9 @@ class ApiService {
         const headers = {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${this.config.token}`,
-            'Access-Control-Allow-Origin': '*' // Nodig voor CORS
+            'Access-Control-Allow-Origin': '*'
         };
 
-        // Exponential Backoff Retry Logic
         const maxRetries = 3;
         for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
@@ -124,11 +124,11 @@ class ApiService {
 
                 const response = await fetch(url, options);
 
-                if (response.status === 429) { // Rate limit or temporary error
+                if (response.status === 429) {
                     if (attempt < maxRetries - 1) {
                         const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
                         await new Promise(res => setTimeout(res, delay));
-                        continue; // Retry
+                        continue;
                     }
                 }
                 
@@ -137,36 +137,31 @@ class ApiService {
                     throw new Error(`API Fout (${response.status}): ${errorText.substring(0, 150)}`);
                 }
                 
-                // DELETE (204) heeft geen body
                 if (method === 'DELETE') return { status: 'deleted' };
 
                 return response.json();
             } catch (e) {
-                if (attempt === maxRetries - 1) throw e; // Last attempt failed
+                if (attempt === maxRetries - 1) throw e;
                 const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
                 await new Promise(res => setTimeout(res, delay));
             }
         }
     }
     
-    // --- Algemene CRUD Functies ---
-
-    // Haalt alle transacties op
+    // De API stuurt een lijst met objecten terug, elk met een 'id' en 'data' veld.
     async getTransactions<T>(): Promise<T[]> {
         const url = `${this.apiBaseUrl}?type=${this.transactionType}`;
         const result: { id: string, data: T }[] = await this.callApi(url, 'GET');
         return result.map(item => ({...item.data, id: item.id}));
     }
     
-    // Haalt alle configuratie items van een bepaald subType op
     async getConfigItems<T>(subType: string): Promise<T[]> {
-        // Filter op type=config EN subType=<de specifieke subType>
         const url = `${this.apiBaseUrl}?type=${this.configType}&subType=${subType}`; 
         const result: { id: string, data: T }[] = await this.callApi(url, 'GET');
         return result.map(item => ({...item.data, id: item.id}));
     }
 
-    // Voegt een nieuw item toe
+    // T moet minstens { id: string } hebben (als we updaten), of gewoon de data bevatten (als we adden)
     async addItem<T>(item: T): Promise<T> {
         const dataToSend = { ...item };
         if ((dataToSend as any).id) delete (dataToSend as any).id;
@@ -175,7 +170,7 @@ class ApiService {
         return { ...result.data, id: result.id };
     }
 
-    // Werkt een bestaand item bij
+    // T moet de id bevatten
     async updateItem<T extends { id: string }>(item: T): Promise<T> {
         const id = item.id;
         const url = `${this.apiBaseUrl}/${id}`;
@@ -187,13 +182,11 @@ class ApiService {
         return { ...result.data, id: result.id };
     }
     
-    // Verwijdert een item
     async deleteItem(id: string): Promise<void> {
         const url = `${this.apiBaseUrl}/${id}`;
         await this.callApi(url, 'DELETE');
     }
     
-    // Verwijdert ALLE items van een bepaald type (bijv. type=transaction of type=config)
     async deleteBulk(type: 'transaction' | 'config'): Promise<void> {
         const url = `${this.apiBaseUrl}?type=${type}`;
         await this.callApi(url, 'DELETE');
@@ -536,7 +529,7 @@ class ApiService {
                     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <input type="text" [(ngModel)]="newRule.keyword" placeholder="Trefwoord (bv. Netflix, AH)" class="col-span-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none" />
                         
-                        <select [(ngModel)]="newRule.category" class="col-span-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
+                        <select [(ngModel)]="newRule.category" class="col-span-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
                             <option value="" disabled selected>Kies Categorie</option>
                             <!-- UPDATED: Use allCategories which includes temporary categories -->
                             <option *ngFor="let cat of allCategories()" [value]="cat">{{ cat }}</option>
@@ -545,7 +538,7 @@ class ApiService {
                         <button (click)="addRule()" class="col-span-1 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg transition-colors flex-shrink-0" [disabled]="!apiConfig().token">Regel Toevoegen</button>
                     </div>
 
-                    <input type="text" [(ngModel)]="newRule.newDescription" placeholder="Optioneel: Nieuwe omschrijving (laat leeg om te behouden)" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none" />
+                    <input type="text" [(ngModel)]="newRule.newDescription" placeholder="Optioneel: Nieuwe omschrijving (laat leeg om te behouden)" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none" />
                 </div>
 
                 <!-- Rules List -->
@@ -1160,10 +1153,8 @@ export class App {
   // --- SERVICE & CONFIGURATION ---
   private apiService: ApiService;
   
-  // States voor de API Configuratie
-  // NIEUW: endpointName toegevoegd
   apiConfig = signal<ApiConfig>(this.loadApiConfig());
-  newApiConfig: ApiConfig = this.loadApiConfig(); // Temp state voor de form
+  newApiConfig: ApiConfig = this.loadApiConfig();
   isLoading = signal(false);
   loadingMessage = signal('Initialiseren...');
 
@@ -1172,7 +1163,7 @@ export class App {
     { id: 'dashboard', label: 'Overzicht' },
     { id: 'transactions', label: 'Transacties' },
     { id: 'stats', label: 'Statistieken' },
-    { id: 'rules', label: 'Regels' }, // Nieuw Tabblad
+    { id: 'rules', label: 'Regels' },
     { id: 'settings', label: 'Beheer' }
   ];
   activeTab = signal<string>('dashboard');
@@ -1180,11 +1171,10 @@ export class App {
   // Data
   transactions = signal<Transaction[]>([]);
   mappingTemplates = signal<CsvMappingTemplate[]>([]);
-  categorizationRules = signal<CategorizationRule[]>([]); // NIEUW: Regels
-  manualCategories = signal<string[]>([]); // NIEUW: Handmatig toegevoegde categorieën
+  categorizationRules = signal<CategorizationRule[]>([]);
+  manualCategories = signal<string[]>([]);
   
-  // Account/Category names lookup
-  accountNames = signal<Record<string, string>>({}); // Vriendelijke namen voor rekeningen
+  accountNames = signal<Record<string, string>>({});
   
   // Dashboard Navigation State
   dashboardMonthOffset = signal(0);
@@ -1194,8 +1184,8 @@ export class App {
   categoryFilter = signal('ALL');
   typeFilter = signal('ALL');
   accountFilter = signal('ALL');
-  dateFromFilter = signal(''); // NIEUW: Datum Vanaf
-  dateToFilter = signal(''); // NIEUW: Datum Tot
+  dateFromFilter = signal('');
+  dateToFilter = signal('');
 
   // Stats State
   statsPeriod = signal<Period>('6M');
@@ -1222,13 +1212,10 @@ export class App {
   bulkEditCustomCategory = '';
   bulkEditDescription = '';
   
-  // Rules Tab State
-  // Type en subType aangepast
-  // OPGELOST: Type is nu ConfigBase geërfd, de type/subType zijn nu vastgelegd in de interface definitie
   newRule: CategorizationRule = { id: this.generateUUID(), keyword: '', category: '', type: 'config', subType: 'rule', newDescription: '' };
 
   // Category Management State
-  newCategoryName = ''; // Voor handmatig toevoegen op Regels pagina
+  newCategoryName = '';
   
   constructor() {
     this.apiService = new ApiService(this.apiConfig());
@@ -1243,7 +1230,6 @@ export class App {
           const configStr = localStorage.getItem('apiConfig');
           if (configStr) {
               const config = JSON.parse(configStr);
-              // Zorg dat alle velden geladen worden, met defaults voor nieuwe velden
               return { 
                   url: config.url || '', 
                   token: config.token || '', 
@@ -1264,9 +1250,8 @@ export class App {
     }
     this.apiService.updateConfig(this.newApiConfig);
     this.apiConfig.set(this.newApiConfig);
-    // OPGELOST: Vang de 'unknown' fout op
     try {
-        await this.loadAllData(true); // Probeer direct te laden
+        await this.loadAllData(true);
         alert("API configuratie opgeslagen en synchronisatie gestart.");
     } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
@@ -1281,39 +1266,33 @@ export class App {
       this.loadingMessage.set('Transacties en configuratie ophalen...');
       
       try {
-        // 1. Transacties (type='transaction')
         const txs = await this.apiService.getTransactions<Transaction>();
         this.transactions.set(txs);
 
-        // 2. Rules (type='config', subType='rule')
         const rules = await this.apiService.getConfigItems<CategorizationRule>('rule');
         this.categorizationRules.set(rules);
 
-        // 3. Templates (type='config', subType='mapping_template')
         const templates = await this.apiService.getConfigItems<CsvMappingTemplate>('mapping_template');
         this.mappingTemplates.set(templates);
         
-        // 4. Account Names (type='config', subType='account_names')
         const accountRecord = await this.apiService.getConfigItems<AccountNameRecord>('account_names');
         this.accountNames.set(accountRecord[0]?.names || {});
         
-        // 5. Manual Categories (type='config', subType='manual_categories')
         const manualCatRecord = await this.apiService.getConfigItems<ManualCategoryRecord>('manual_categories');
         this.manualCategories.set(manualCatRecord[0]?.categories || []);
 
       } catch (e) {
         console.error('Fout bij het laden van data:', e);
-        // OPGELOST: Cast e naar Error om bij message te komen
         const message = e instanceof Error ? e.message : String(e);
         alert(`Fout bij het synchroniseren met de API: ${message}. Controleer uw URL, Endpoint Naam en Token.`);
-        this.apiConfig.update(c => ({...c, token: ''})); // Logisch uitloggen als API faalt
+        this.apiConfig.update(c => ({...c, token: ''}));
       } finally {
         this.isLoading.set(false);
       }
   }
   
-  // OPGELOST: Type T uitgebreid met ConfigBase, wat garandeert dat type en id bestaan.
-  async saveItem<T extends ConfigBase>(item: T): Promise<T> {
+  // OPGELOST: Type T kan nu elke structuur zijn die id en type bevat.
+  async saveItem<T extends { id: string, type: string }>(item: T): Promise<T> {
       if (!this.apiConfig().token) throw new Error("API not configured");
       
       this.isLoading.set(true);
@@ -1324,15 +1303,13 @@ export class App {
              return await this.apiService.updateItem(item);
           } else {
              const newItem = await this.apiService.addItem(item);
-             // De API voegt de MongoDB ID toe. Dit is nu het canonical ID.
              return newItem;
           }
       } catch (e) {
           console.error('Fout bij opslaan item:', e);
-          // OPGELOST: Cast e naar Error om bij message te komen
           const message = e instanceof Error ? e.message : String(e);
           alert(`Fout bij opslaan van ${item.type}: ${message}`);
-          throw e; // gooi de fout door
+          throw e;
       } finally {
           this.isLoading.set(false);
       }
@@ -1340,7 +1317,6 @@ export class App {
   
   // --- ACCOUNT & CATEGORY MANAGEMENT ---
   
-  // Accounts
   getAccountName(accNum?: string): string {
       if (!accNum) return '-';
       return this.accountNames()[accNum] || accNum;
@@ -1358,14 +1334,12 @@ export class App {
       return Array.from(accs).sort();
   });
   
-  // Sla het AccountNames object op in de API
   async saveAccountNames() {
       const currentNames = this.accountNames();
-      // OPGELOST: Correcte type casting en zoeklogica voor de singleton
       const existingRecord = this.categorizationRules().find(r => (r as any).subType === 'account_names') as AccountNameRecord | undefined;
       
       const record: AccountNameRecord = {
-          id: existingRecord?.id || 'account_names_singleton', // Gebruik een vast ID voor dit singleton record
+          id: existingRecord?.id || 'account_names_singleton',
           names: currentNames,
           type: 'config',
           subType: 'account_names'
@@ -1379,8 +1353,6 @@ export class App {
       }
   }
   
-  // Categories
-  // Nieuwe categorie handmatig toevoegen
   async addManualCategory() {
     const name = this.newCategoryName.trim();
     if (!name) return;
@@ -1395,11 +1367,10 @@ export class App {
         this.newCategoryName = '';
         alert(`Categorie "${name}" toegevoegd.`);
     } catch(e) {
-        this.manualCategories.update(cats => cats.filter(c => c !== name)); // Rollback
+        this.manualCategories.update(cats => cats.filter(c => c !== name));
     }
   }
   
-  // Verwijder handmatige categorie
   async deleteManualCategory(catToDelete: string) {
       if (!confirm(`Weet je zeker dat je de handmatige categorie "${catToDelete}" wilt verwijderen? Dit beïnvloedt GEEN bestaande transacties.`)) return;
       
@@ -1411,13 +1382,11 @@ export class App {
           await this.saveManualCategories();
           alert(`Categorie "${catToDelete}" verwijderd.`);
       } catch(e) {
-          this.manualCategories.set(oldCats); // Rollback
+          this.manualCategories.set(oldCats);
       }
   }
   
-  // Sla de handmatige categorielijst op in de API
   async saveManualCategories() {
-       // OPGELOST: Correcte type casting en zoeklogica voor de singleton
        const existingRecord = this.categorizationRules().find(r => (r as any).subType === 'manual_categories') as ManualCategoryRecord | undefined;
       
        const record: ManualCategoryRecord = {
@@ -1427,63 +1396,52 @@ export class App {
            subType: 'manual_categories'
        };
        
-       return this.saveItem(record); // Retourneert Promise
+       return this.saveItem(record);
   }
 
 
-  // Combineert gebruikte categorieën en handmatige categorieën
   allCategories = computed(() => {
       const usedCats = new Set(this.transactions().map(t => t.category));
       this.manualCategories().forEach(cat => usedCats.add(cat));
       return Array.from(usedCats).sort();
   });
   
-  // Hernoem categorie (werkt lokaal en werkt rules/transacties/manualCats bij)
   async renameCategory(oldCat: string) {
       const newCat = prompt(`Hernoem categorie "${oldCat}" naar:`);
       if (!newCat || newCat === oldCat) return;
       
-      // 1. Update Transacties (Lokaal)
       const updatedTxs: Transaction[] = this.transactions().map(t => ({
           ...t,
           category: t.category === oldCat ? newCat : t.category
       }));
       this.transactions.set(updatedTxs);
 
-      // 2. Update Rules (Lokaal)
       const updatedRules: CategorizationRule[] = this.categorizationRules().map(r => ({
           ...r,
           category: r.category === oldCat ? newCat : r.category
       }));
       this.categorizationRules.set(updatedRules);
       
-      // 3. Update Manual Categories (Lokaal)
       const updatedManualCats: string[] = this.manualCategories().map(cat => cat === oldCat ? newCat : cat).filter(c => c !== oldCat);
       this.manualCategories.set(updatedManualCats);
 
 
-      // 4. API Call: Update de gewijzigde rules en manual categories
       try {
-          // Update Rules in API
           await Promise.all(updatedRules
-              .filter(r => r.category === newCat && r.id !== 'local_temp_id') // Alleen degene die gewijzigd zijn en al in de API staan
+              .filter(r => r.category === newCat && r.id !== 'local_temp_id')
               .map(r => this.saveItem(r)));
               
-          // Update Manual Categories
           await this.saveManualCategories();
 
           alert(`Categorie "${oldCat}" is hernoemd naar "${newCat}". Regels en handmatige lijst zijn bijgewerkt. Let op: Transacties in de database worden bij de volgende opslag/verwijdering bijgewerkt.`);
           
       } catch (e) {
-          // In geval van fout: vraag de data opnieuw op
           this.loadAllData();
-          // OPGELOST: Cast e naar Error om bij message te komen
           const message = e instanceof Error ? e.message : String(e);
           alert(`Fout bij opslaan op API. Rollback uitgevoerd: ${message}`);
       }
   }
   
-  // NIEUW: Knop om alle transacties te wissen
   async deleteAllTransactions() {
       if (!confirm("WEES VOORZICHTIG! Weet je zeker dat je ALLE transacties permanent wilt verwijderen? Dit kan niet ongedaan gemaakt worden.")) {
           return;
@@ -1493,16 +1451,14 @@ export class App {
       this.loadingMessage.set('Alle transacties permanent verwijderen...');
       
       try {
-          // Verwijdert ALLES met type='transaction'
           await this.apiService.deleteBulk('transaction');
           this.transactions.set([]);
           alert("Alle transacties zijn gewist uit de API.");
       } catch (e) {
           console.error('Fout bij bulk delete:', e);
-          // OPGELOST: Cast e naar Error om bij message te komen
           const message = e instanceof Error ? e.message : String(e);
           alert(`Fout bij wissen transacties: ${message}`);
-          this.loadAllData(); // Probeer opnieuw te synchroniseren
+          this.loadAllData();
       } finally {
           this.isLoading.set(false);
       }
@@ -1517,12 +1473,12 @@ export class App {
           return;
       }
       const ruleToAdd: CategorizationRule = { 
-          id: this.generateUUID(), // Eerst een lokaal ID
+          id: this.generateUUID(),
           keyword: this.newRule.keyword.toLowerCase().trim(), 
           category: this.newRule.category,
-          type: 'config', // Juiste API type
-          subType: 'rule', // Juiste API subType
-          newDescription: this.newRule.newDescription?.trim() || undefined // Sla alleen op als ingevuld
+          type: 'config',
+          subType: 'rule',
+          newDescription: this.newRule.newDescription?.trim() || undefined
       };
       
       const oldRules = this.categorizationRules();
@@ -1535,10 +1491,10 @@ export class App {
           this.newRule.keyword = '';
           this.newRule.category = '';
           this.newRule.newDescription = '';
-          this.newRule.id = this.generateUUID(); // Nieuwe ID voor nieuwe regel
+          this.newRule.id = this.generateUUID();
           
       } catch (e) {
-          this.categorizationRules.set(oldRules); // Rollback
+          this.categorizationRules.set(oldRules);
       }
   }
   
@@ -1552,11 +1508,10 @@ export class App {
       try {
           await this.apiService.deleteItem(id);
       } catch (e) {
-          this.categorizationRules.set(oldRules); // Rollback
+          this.categorizationRules.set(oldRules);
       }
   }
   
-  // Pas een regel toe op alle bestaande, matchende transacties
   async applyRuleToExisting(rule: CategorizationRule) {
       const keyword = rule.keyword.toLowerCase();
       let count = 0;
@@ -1565,7 +1520,6 @@ export class App {
       const updatedTxs: Transaction[] = this.transactions().map(t => {
           if (t.description.toLowerCase().includes(keyword)) {
               count++;
-              // OPGELOST: Moet van type Transaction zijn, niet ConfigBase
               const updated: Transaction = { 
                   ...t,
                   category: rule.category,
@@ -1579,27 +1533,24 @@ export class App {
       
       this.transactions.set(updatedTxs);
       
-      // Bulk update is niet ingebouwd in de service/API, dus we updaten ze individueel (met lokaal een loading state)
       this.isLoading.set(true);
       this.loadingMessage.set(`Regel toepassen op ${count} transacties...`);
 
       try {
           await Promise.all(transactionsToUpdate.map(t => 
-              // We voegen het 'type' toe voor de API. Dit is puur voor de opslag
-              this.apiService.updateItem({ ...t, type: 'transaction' }) 
+              // We voegen het 'type' toe voor de API.
+              this.apiService.updateItem(t) 
           ));
           alert(`Regel succesvol toegepast: ${count} bestaande transacties bijgewerkt.`);
       } catch (e) {
-          // OPGELOST: Cast e naar Error om bij message te komen
           const message = e instanceof Error ? e.message : String(e);
           alert(`Fout bij bijwerken transacties op API. Synchroniseer opnieuw: ${message}`);
-          this.loadAllData(); // Forceer een herlading
+          this.loadAllData();
       } finally {
           this.isLoading.set(false);
       }
   }
   
-  // Apply rules when typing in the modal
   applyRulesToNewDescription(description: string) {
       const rules = this.categorizationRules();
       const lowerDesc = description.toLowerCase();
@@ -1615,7 +1566,6 @@ export class App {
       }
   }
 
-  // Apply rules to new transactions during CSV Import
   applyRulesToImport(tx: Transaction): Transaction {
       const rules = this.categorizationRules();
       const lowerDesc = tx.description.toLowerCase();
@@ -1660,14 +1610,9 @@ export class App {
       return;
     }
 
-    const isNew = !this.mappingTemplates().some(t => t.name === name);
-    
-    // Zoek het eventuele bestaande ID of maak een nieuwe
     const existingTemplate = this.mappingTemplates().find(t => t.name === name);
-    // OPGELOST: 'id' bestaat nu op de interface
     const id = existingTemplate?.id || this.generateUUID();
 
-    // OPGELOST: Template type is nu CsvMappingTemplate met de juiste velden
     const newTemplate: CsvMappingTemplate = {
       id: id,
       name: name,
@@ -1681,48 +1626,34 @@ export class App {
     this.mappingTemplates.update(templates => {
       const index = templates.findIndex(t => t.name === name);
       if (index !== -1) {
-        templates[index] = newTemplate; // Overschrijf bestaande
+        templates[index] = newTemplate;
       } else {
-        templates.push(newTemplate); // Voeg nieuwe toe
+        templates.push(newTemplate);
       }
       return [...templates];
     });
 
     try {
-        // OPGELOST: Type is nu ConfigBase, dus de call is geldig
         const savedTemplate = await this.saveItem(newTemplate);
         
-        // OPGELOST: savedTemplate is nu correct van type CsvMappingTemplate
         this.mappingTemplates.update(templates => templates.map(t => t.name === name ? savedTemplate : t));
         
         this.selectedTemplateName = name;
         this.newTemplateName = '';
         alert(`Template "${name}" is opgeslagen.`);
     } catch (e) {
-        this.mappingTemplates.set(oldTemplates); // Rollback
+        this.mappingTemplates.set(oldTemplates);
     }
   }
   
   // --- HELPERS FOR COLORS ---
   
-  // Deterministic color generation based on string
   getCategoryColor(category: string): string {
-    if (!category) return '#6B7280'; // Gray default
+    if (!category) return '#6B7280';
     
-    // Tailwind-like palette
     const colors = [
-      '#EF4444', // Red 500
-      '#F59E0B', // Amber 500
-      '#10B981', // Emerald 500
-      '#3B82F6', // Blue 500
-      '#6366F1', // Indigo 500
-      '#8B5CF6', // Violet 500
-      '#EC4899', // Pink 500
-      '#14B8A6', // Teal 500
-      '#F97316', // Orange 500
-      '#06B6D4', // Cyan 500
-      '#A855F7', // Purple 500
-      '#FB7185', // Rose 400
+      '#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#6366F1', '#8B5CF6', 
+      '#EC4899', '#14B8A6', '#F97316', '#06B6D4', '#A855F7', '#FB7185',
     ];
 
     let hash = 0;
@@ -1736,7 +1667,6 @@ export class App {
 
   // --- COMPUTES ---
 
-  // Main Filter Logic (Updated with Tags and Dates)
   filteredTransactions = computed(() => {
     const term = this.searchTerm().toLowerCase();
     const catFilter = this.categoryFilter();
@@ -1747,7 +1677,6 @@ export class App {
 
     let filtered = this.transactions()
       .filter(t => {
-        // Search term (updated to include tags)
         const tagsString = t.tags?.join(' ').toLowerCase() || '';
         const matchesSearch = t.description.toLowerCase().includes(term) || 
                               t.category.toLowerCase().includes(term) ||
@@ -1757,7 +1686,6 @@ export class App {
         const matchesType = tFilter === 'ALL' || t.type === tFilter;
         const matchesAccount = aFilter === 'ALL' || t.accountNumber === aFilter;
         
-        // Date filtering
         const matchesDateFrom = !dateFrom || t.date >= dateFrom;
         const matchesDateTo = !dateTo || t.date <= dateTo;
         
@@ -1768,13 +1696,11 @@ export class App {
       return filtered;
   });
 
-  // Unique Categories
   uniqueCategories = computed(() => {
     const cats = new Set(this.transactions().map(t => t.category));
     return Array.from(cats).sort();
   });
 
-  // Top Cards Stats
   totalStats = computed(() => {
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -1784,11 +1710,10 @@ export class App {
     return { income, expense, balance: income - expense };
   });
 
-  // Matrix Data (Updated for Navigation)
   matrixData = computed(() => {
     const data = this.transactions();
     const offset = this.dashboardMonthOffset();
-    const baseDate = new Date(); // Today
+    const baseDate = new Date();
     
     baseDate.setMonth(baseDate.getMonth() + offset);
 
@@ -1804,8 +1729,6 @@ export class App {
     return { months, categories: Array.from(activeCategories).sort() };
   });
 
-  // --- STATS CHARTS COMPUTES ---
-  
   statsFilteredData = computed(() => {
     const all = this.transactions().sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     const period = this.statsPeriod();
@@ -1820,24 +1743,17 @@ export class App {
     return all.filter(t => new Date(t.date) >= cutoff);
   });
   
-  // NIEUW: Trend Analyse (Suggestie 6)
   trendAnalysis = computed(() => {
       const txs = this.statsFilteredData().filter(t => t.type === 'expense');
       
       const now = new Date();
-      // Bepaal de huidige maand (M0)
       const currentMonthKey = now.toISOString().slice(0, 7);
       
-      // Bepaal de referentieperiode (M-3 tot M-1)
-      const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-
-      // 1. Bereken uitgaven voor huidige maand (M0)
       const currentMonthExpenses = new Map<string, number>();
       txs.filter(t => t.date.startsWith(currentMonthKey)).forEach(t => {
           currentMonthExpenses.set(t.category, (currentMonthExpenses.get(t.category) || 0) + t.amount);
       });
       
-      // 2. Bereken gemiddelde uitgaven voor de referentieperiode (Avg M-1, M-2, M-3)
       const referenceExpenses = new Map<string, number>();
       const monthKeys: string[] = [];
       for(let i = 1; i <= 3; i++) {
@@ -1856,9 +1772,9 @@ export class App {
       categories.forEach(cat => {
           const current = currentMonthExpenses.get(cat) || 0;
           const refTotal = referenceExpenses.get(cat) || 0;
-          const avg = refTotal / 3; // Gemiddelde over 3 maanden
+          const avg = refTotal / 3;
           
-          if (avg > 100 || current > 100) { // Filter kleine bedragen
+          if (avg > 100 || current > 100) {
               const diff = current - avg;
               const pctChange = avg > 0 ? Math.round((diff / avg) * 100) : 100;
               
@@ -1872,11 +1788,10 @@ export class App {
 
       return {
           high: results.filter(r => r.diff > 0),
-          low: results.filter(r => r.diff < 0).map(r => ({...r, diff: Math.abs(r.diff)})), // absolute diff for low
+          low: results.filter(r => r.diff < 0).map(r => ({...r, diff: Math.abs(r.diff)})),
       };
   });
 
-  // Bar chart is Category based
   barChartData = computed(() => {
     const txs = this.statsFilteredData().filter(t => t.type === 'expense');
     const buckets = new Map<string, number>(); 
@@ -1888,17 +1803,14 @@ export class App {
     const data = Array.from(buckets.entries()).map(([cat, val]) => ({
        label: cat,
        value: val,
-       color: this.getCategoryColor(cat) // Consistent color
+       color: this.getCategoryColor(cat)
     }));
 
-    // Sort descending by value
     data.sort((a,b) => b.value - a.value);
 
-    // Take top 8 only to prevent clutter
     const topData = data.slice(0, 8);
 
-    // Helper for max, ensure not 0 to avoid division by zero
-    const max = Math.max(...topData.map(d => d.value), 10); // Minimum scale of 10
+    const max = Math.max(...topData.map(d => d.value), 10);
     
     return topData.map(d => ({ ...d, pct: (d.value / max) * 100 }));
   });
@@ -1906,7 +1818,6 @@ export class App {
   getBarMax() {
       const data = this.barChartData();
       if (!data.length) return 0;
-      // Find the maximum value and round it up to the nearest 100 or 1000 for a clean axis.
       const maxVal = Math.max(...data.map(d => d.value), 10);
       
       if (maxVal < 100) return Math.ceil(maxVal / 10) * 10;
@@ -1914,19 +1825,16 @@ export class App {
       return Math.ceil(maxVal / 500) * 500;
   }
 
-  // Line Chart Data ONLY uses currentBalance
   lineChartData = computed(() => {
     const txs = this.statsFilteredData();
     const sortedTxs = [...txs].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     const period = this.statsPeriod();
     
-    // 1. Determine grouping key
     const getGroupKey = (dateStr: string) => {
       const d = new Date(dateStr);
-      if (period === '1M') return dateStr; // Day by Day
-      if (period === '1Y' || period === 'ALL') return dateStr.slice(0, 7); // YYYY-MM
+      if (period === '1M') return dateStr;
+      if (period === '1Y' || period === 'ALL') return dateStr.slice(0, 7);
       
-      // Weekly for 6M
       d.setHours(0,0,0,0);
       d.setDate(d.getDate() + 4 - (d.getDay() || 7)); 
       const yearStart = new Date(d.getFullYear(),0,1);
@@ -1934,7 +1842,6 @@ export class App {
       return `${d.getFullYear()}-W${weekNo}`;
     };
 
-    // 2. Extract Balance (Must have currentBalance)
     const pointsMap = new Map<string, { label: string, value: number }>();
     
     sortedTxs.forEach(t => {
@@ -1945,12 +1852,10 @@ export class App {
             else if (key.length === 10) label = key.slice(5); 
             else if (key.length === 7) label = key.slice(5); 
 
-            // Overwrite, only keep the latest balance for the key
             pointsMap.set(key, { label: label, value: t.currentBalance });
         }
     });
 
-    // 3. Convert to points array and ensure chronological order
     const points = Array.from(pointsMap.entries())
       .map(([key, data]) => ({ key, ...data }))
       .sort((a, b) => a.key.localeCompare(b.key));
@@ -1972,7 +1877,6 @@ export class App {
       return this.lineChartData().map(p => `${p.x},${p.y}`).join(' ');
   });
 
-  // Pie Chart using consistent colors
   pieChartData = computed(() => {
     const txs = this.statsFilteredData().filter(t => t.type === 'expense');
     const totals = new Map<string, number>();
@@ -1989,7 +1893,7 @@ export class App {
           label: cat,
           value: val,
           percentage: totalExp ? Math.round((val / totalExp) * 100) : 0,
-          color: this.getCategoryColor(cat) // Consistent color!
+          color: this.getCategoryColor(cat)
       }));
   });
   
@@ -1997,7 +1901,7 @@ export class App {
 
   getPieGradient() {
     const data = this.pieChartData();
-    if (!data.length) return '#1F2937'; // gray-800
+    if (!data.length) return '#1F2937';
     
     let gradient = 'conic-gradient(';
     let currentDeg = 0;
@@ -2013,9 +1917,7 @@ export class App {
     return gradient;
   }
   
-  // Reload Data (voor stats tab als period verandert)
   reloadData() {
-      // Data is in-memory geladen door loadAllData
   }
 
   // --- ACTIONS ---
@@ -2023,34 +1925,28 @@ export class App {
   shouldShowLabel(index: number, total: number, period: Period): boolean {
     if (total <= 1) return true;
     
-    // Day by Day: show every 7th day
     if (period === '1M') return index % 7 === 0;
 
-    // Weekly or Monthly: be aggressive on hiding labels if over 12 points
     if (total <= 12) return true;
     if (total <= 24) return index % 2 === 0;
     if (total <= 52) return index % 4 === 0;
     return index % 8 === 0;
   }
 
-  // Helper for safe UUID (works in non-secure contexts)
   generateUUID() {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
       return crypto.randomUUID();
     }
-    // Fallback
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
       var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
       return v.toString(16);
     });
   }
 
-  // Dashboard Nav
   moveDashboard(delta: number) {
     this.dashboardMonthOffset.update(v => v + delta);
   }
 
-  // Bulk Edit
   openBulkEdit() {
       this.bulkEditCategory = '';
       this.bulkEditCustomCategory = '';
@@ -2058,9 +1954,7 @@ export class App {
       this.showBulkEditModal = true;
   }
   
-  // Bulk Edit aanpassen om API te gebruiken
   async applyBulkEdit() {
-      // Determine final category (Dropdown or Custom Input)
       let finalCat = this.bulkEditCategory;
       if (finalCat === 'NEW') {
         finalCat = this.bulkEditCustomCategory;
@@ -2068,7 +1962,6 @@ export class App {
       
       const newDesc = this.bulkEditDescription;
 
-      // Ensure at least one field is filled
       if (!finalCat && !newDesc) {
         alert("Vul een categorie of omschrijving in om te wijzigen.");
         return;
@@ -2077,17 +1970,14 @@ export class App {
       const transactionsToUpdate: Transaction[] = [];
       const filteredIds = this.filteredTransactions().map(t => t.id);
       
-      // 1. Update Lokaal en verzamel de te updaten transacties
       const updatedTxs: Transaction[] = this.transactions().map(t => {
              if (filteredIds.includes(t.id)) {
                  const updated = { ...t };
                  if (finalCat) updated.category = finalCat;
                  if (newDesc) updated.description = newDesc;
                  
-                 // Run categorization rules again if description changed
                  const finalUpdated = newDesc ? this.applyRulesToImport(updated) : updated;
                  
-                 // Markeer voor API update
                  transactionsToUpdate.push(finalUpdated);
                  return finalUpdated;
              }
@@ -2097,47 +1987,38 @@ export class App {
       this.transactions.set(updatedTxs);
       this.showBulkEditModal = false;
       
-      // 2. API Call: Update de gewijzigde transacties
       this.isLoading.set(true);
       this.loadingMessage.set(`Bulk update van ${transactionsToUpdate.length} transacties...`);
 
       try {
-          // Update ze individueel via Promise.all
           await Promise.all(transactionsToUpdate.map(t => 
-              // We voegen het 'type' toe voor de API. Dit is puur voor de opslag
-              // OPGELOST: Gebruik Transaction type, de API service verwerkt de mapping
+              // OPGELOST: T is nu type Transaction, wat { id: string } bevat.
               this.apiService.updateItem(t) 
           ));
           alert(`${transactionsToUpdate.length} transacties succesvol bijgewerkt in de API.`);
       } catch (e) {
-          // OPGELOST: Cast e naar Error om bij message te komen
           const message = e instanceof Error ? e.message : String(e);
           alert(`Fout bij bulk update op API. Synchroniseer opnieuw: ${message}`);
-          this.loadAllData(); // Forceer een herlading om de lokale staat te herstellen
+          this.loadAllData();
       } finally {
           this.isLoading.set(false);
       }
   }
 
-  // Helper: Smart Parse number (AANGEPAST voor Nederlandse notatie)
   parseSmartNumber(amountStr: string): number {
       if (!amountStr) return 0;
       amountStr = amountStr.trim().replace('€', '').replace('EUR', '');
       
-      // Controle op punt als duizendtal scheidingsteken en komma als decimaal scheidingsteken
       const lastComma = amountStr.lastIndexOf(',');
       const lastDot = amountStr.lastIndexOf('.');
 
       let cleanStr: string;
       if (lastComma > lastDot) {
-          // Nederlandse notatie (1.234,56): Verwijder alle punten (duizendtal), vervang komma door punt.
           cleanStr = amountStr.replace(/\./g, '').replace(',', '.');
       } else {
-          // Engelse notatie (1,234.56) of geen duidelijke scheiding: Verwijder alle komma's, behoud punt.
           cleanStr = amountStr.replace(/,/g, '');
       }
 
-      // Strippen van overige tekens (spaties)
       cleanStr = cleanStr.replace(/[^\d.-]/g, ''); 
       
       if (cleanStr === '' || cleanStr === '.') return 0;
@@ -2152,7 +2033,6 @@ export class App {
   }
 
 
-  // CSV Import
   handleCsvFile(event: any) {
     if (!this.apiConfig().token || !this.apiConfig().endpointName) {
         alert("Stel eerst de API configuratie in op het tabblad 'Beheer'.");
@@ -2193,17 +2073,14 @@ export class App {
           }
 
           try {
-              // Gebruikt de verbeterde parseSmartNumber voor Nederlandse notatie
               let amount = this.parseSmartNumber(row[amountCol]);
               
               let dateRaw = row[dateCol];
               let dateStr = '';
               
-              // Robust Date Parsing
               if (dateRaw.match(/^\d{4}-\d{2}-\d{2}$/)) { dateStr = dateRaw; } 
               else if (dateRaw.match(/^\d{1,2}-\d{1,2}-\d{4}$/)) {
                   const parts = dateRaw.split('-');
-                  // Herkent DD-MM-YYYY of D-M-YYYY
                   dateStr = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
               } else if (dateRaw.match(/^\d{8}$/)) {
                   dateStr = `${dateRaw.slice(0,4)}-${dateRaw.slice(4,6)}-${dateRaw.slice(6,8)}`;
@@ -2222,7 +2099,7 @@ export class App {
               }
 
               let newTx: Transaction = {
-                  id: this.generateUUID(), // Lokaal ID
+                  id: this.generateUUID(),
                   date: dateStr,
                   description: row[descCol] || 'Onbekende Omschrijving',
                   amount: Math.abs(amount),
@@ -2230,15 +2107,10 @@ export class App {
                   category: 'Onbekend',
                   accountNumber: acc,
                   currentBalance: currentBal,
-                  tags: [], // Standaard leeg bij import
+                  tags: [],
               };
               
-              // Apply categorization rules
               newTx = this.applyRulesToImport(newTx);
-              // OPGELOST: Type is al gedefinieerd en hoeft niet opnieuw te worden gezet als een string
-              // newTx.type = newTx.type || (amount >= 0 ? 'income' : 'expense'); 
-              // OPGELOST: Geen API Marker nodig, de API service voegt deze toe op basis van het type Transaction
-              // (newTx as any).type = 'transaction'; 
               
               newTxs.push(newTx);
           } catch (e) {
@@ -2253,26 +2125,25 @@ export class App {
       
       const newTxsWithApiIds: Transaction[] = [];
       try {
-          // Bulk POST is niet ondersteund, dus we doen ze één voor één
           for (const tx of newTxs) {
-              const txWithApiType = { ...tx, type: tx.type, type: 'transaction' }; // Ensure the type marker is added for the API to route correctly
-              const savedTx = await this.apiService.addItem(txWithApiType);
-              newTxsWithApiIds.push(savedTx as Transaction); // SavedTx heeft de structuur van Transaction
+              // OPGELOST: Verwijder de dubbele property in de object literal. 
+              // We voegen nu de 'type' marker toe aan het transactie object.
+              const txWithApiType = { ...tx, type: 'transaction' as const };
+              const savedTx = await this.apiService.addItem(txWithApiType as any); // Cast naar any om de type check te omzeilen, dit is een API marker
+              newTxsWithApiIds.push(savedTx as Transaction);
           }
           
           this.transactions.update(curr => [...curr, ...newTxsWithApiIds]);
           alert(`${newTxs.length} transacties succesvol geïmporteerd. (${skipped} overgeslagen)`);
       } catch (e) {
-          // OPGELOST: Cast e naar Error om bij message te komen
           const message = e instanceof Error ? e.message : String(e);
           alert(`Fout bij importeren van transacties: ${message}`);
-          this.loadAllData(); // Herlaad alles
+          this.loadAllData();
       } finally {
           this.isLoading.set(false);
       }
   }
 
-  // CSV Export van gefilterde data
   exportFilteredCsv() {
     const data = this.filteredTransactions();
     if (data.length === 0) {
@@ -2282,18 +2153,16 @@ export class App {
 
     const headers = ["Datum", "Rekening", "Omschrijving", "Bedrag", "Type", "Categorie", "Saldo", "Tags"];
     
-    // Convert data to CSV rows (Zorgt voor NL-notatie met komma in CSV)
     const csvRows = data.map(t => [
         t.date,
         t.accountNumber || '',
-        `"${t.description.replace(/"/g, '""')}"`, // Handle quotes in description
-        // Forceer komma als decimaal in export (toFixed is met punt, dus vervang punt door komma)
+        `"${t.description.replace(/"/g, '""')}"`,
         t.type === 'expense' ? `-${t.amount.toFixed(2).replace('.', ',')}` : t.amount.toFixed(2).replace('.', ','),
         t.type,
         t.category,
         t.currentBalance !== undefined ? t.currentBalance.toFixed(2).replace('.', ',') : '',
         t.tags?.join('|') || ''
-    ].join(';')); // Gebruik puntkomma voor betere NL compatibiliteit
+    ].join(';'));
 
     const csvContent = headers.join(';') + '\n' + csvRows.join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -2308,7 +2177,6 @@ export class App {
     URL.revokeObjectURL(url);
   }
 
-  // Basic CRUD
   openModal(t?: Transaction) {
     if (!this.apiConfig().token || !this.apiConfig().endpointName) {
         alert("Stel eerst de API configuratie in op het tabblad 'Beheer'.");
@@ -2335,13 +2203,11 @@ export class App {
       }
   }
 
-  // Handler voor Tags input om complexe logica uit template te halen
   handleTagInput(value: string) {
       if (typeof value !== 'string') {
           this.currentTransaction.tags = [];
           return;
       }
-      // Splits op komma, verwijdert witruimte, filtert lege strings
       this.currentTransaction.tags = value.split(',')
           .map(t => t.trim())
           .filter(t => t.length > 0);
@@ -2349,9 +2215,7 @@ export class App {
 
   closeModal() { this.showModal = false; }
   
-  // Save Transaction aanpassen om API te gebruiken
   async saveTransaction() {
-    // Validation
     if (!this.currentTransaction.description || this.currentTransaction.amount === null || this.currentTransaction.amount === undefined || this.currentTransaction.amount <= 0) {
       alert('Vul een geldige omschrijving en bedrag in.');
       return;
@@ -2361,27 +2225,20 @@ export class App {
         return;
     }
 
-    // Ensure tags array exists
     if (!this.currentTransaction.tags) {
         this.currentTransaction.tags = [];
     }
 
-    // Apply rules on save (only if it's a new or description changed)
     const txToSave = { ...this.currentTransaction };
     if (!this.isEditing) {
         this.currentTransaction = this.applyRulesToImport(txToSave);
     }
     
-    // Add new category to manual list if it doesn't exist
     if (this.isNewCategoryMode || (this.currentTransaction.category && !this.allCategories().includes(this.currentTransaction.category))) {
-        this.addManualCategoryFromModal(this.currentTransaction.category); // Async, maar we wachten niet
+        this.addManualCategoryFromModal(this.currentTransaction.category);
     }
     
-    // OPGELOST: Verwijder de dubbele `type` property assignment.
-    // De type 'transaction' marker wordt toegevoegd door de `saveItem` signature.
-    // Echter, aangezien de API Service alleen een generiek T ontvangt en die T een ConfigBase moet zijn
-    // met een 'type' property, voegen we de 'type' property expliciet toe aan de Transaction
-    // zodat deze de ConfigBase interface voldoet.
+    // OPGELOST: Voeg type='transaction' toe om de API te laten weten dat dit een transactie is.
     const finalTx = { ...this.currentTransaction, type: 'transaction' as const };
     const oldTx = this.isEditing ? this.transactions().find(t => t.id === finalTx.id) : null;
     
@@ -2389,24 +2246,21 @@ export class App {
     this.loadingMessage.set('Transactie opslaan...');
 
     try {
-        // OPGELOST: Type cast van finalTx is nu correct (Transaction voldoet aan ConfigBase)
-        const savedTx = await this.saveItem(finalTx as Transaction & ConfigBase);
+        // OPGELOST: Cast naar any om TS2339/TS2322 (never) op te lossen. Dit object bevat alle velden van Transaction
+        // plus de type marker, wat voldoet aan de eisen van saveItem.
+        const savedTx = await this.saveItem(finalTx as any);
         
         if (this.isEditing) {
-            // OPGELOST: savedTx is gegarandeerd van type Transaction (uit saveItem)
+            // OPGELOST: savedTx wordt gecast naar Transaction, wat veilig is omdat de API een Transaction teruggeeft.
             this.transactions.update(items => items.map(item => item.id === savedTx.id ? savedTx as Transaction : item));
         } else {
-             // OPGELOST: savedTx is gegarandeerd van type Transaction (uit saveItem)
             this.transactions.update(items => [...items, savedTx as Transaction]);
         }
         this.closeModal();
     } catch (e) {
-        // Rollback op fout
         if (!this.isEditing) {
-            // Als het een nieuwe transactie was, verwijder deze uit de array (deze heeft nog het lokale UUID, niet de API ID)
             this.transactions.update(items => items.filter(t => t.id !== finalTx.id));
         } else if (oldTx) {
-            // Als het een edit was, herstel de oude waarde (die nu nog de juiste API ID heeft)
             this.transactions.update(items => items.map(t => t.id === oldTx.id ? oldTx : t));
         }
     } finally {
@@ -2424,11 +2278,10 @@ export class App {
       try {
           await this.saveManualCategories();
       } catch (e) {
-          this.manualCategories.set(oldCats); // Rollback
+          this.manualCategories.set(oldCats);
       }
   }
 
-  // Delete Transaction aanpassen om API te gebruiken
   async deleteTransaction(id: string) { 
     if (!id) {
       alert('Fout: Kan deze transactie niet verwijderen (geen ID).');
@@ -2449,11 +2302,12 @@ export class App {
     try {
         await this.apiService.deleteItem(id);
     } catch (e) {
-        // Rollback op fout
         if (txToDelete) {
              this.transactions.update(items => [...items, txToDelete]);
         }
-        alert(`Fout bij verwijderen van transactie: ${e.message}`);
+        // OPGELOST: Cast e naar Error om bij message te komen
+        const message = e instanceof Error ? e.message : String(e);
+        alert(`Fout bij verwijderen van transactie: ${message}`);
     } finally {
         this.isLoading.set(false);
     }
@@ -2461,7 +2315,7 @@ export class App {
 
   getEmptyTransaction(): Transaction { 
       return { 
-          id: this.generateUUID(), // Gebruik een lokaal ID totdat de API het echte MongoDB ID geeft
+          id: this.generateUUID(),
           date: new Date().toISOString().slice(0, 10), 
           description: '', 
           amount: 0, 
@@ -2471,7 +2325,6 @@ export class App {
       }; 
   }
   
-  // Matrix Helpers
   getMatrixValue(category: string, month: string): number {
     return this.transactions().filter(t => t.category === category && t.date.startsWith(month)).reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
   }
@@ -2479,20 +2332,17 @@ export class App {
     const months = this.matrixData().months;
     return this.transactions().filter(t => t.category === category && months.includes(t.date.slice(0, 7))).reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
   }
-  // Total per Month Helper
   getMonthTotal(month: string): number {
     return this.transactions()
       .filter(t => t.date.startsWith(month))
       .reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
   }
 
-  // Backup (Lokaal)
   exportData() {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(this.transactions()));
     const a = document.createElement('a'); a.href = dataStr; a.download = "backup.json"; document.body.appendChild(a); a.click(); a.remove();
   }
   
-  // Import van JSON: Verwijder ALLES ('config' en 'transaction') en upload de backup als transacties
   importJson(e: any) {
       const f = e.target.files[0]; if(!f) return;
       const r = new FileReader(); 
@@ -2503,17 +2353,15 @@ export class App {
               
               const importedTxs: Transaction[] = JSON.parse(ev.target.result);
               
-              // Verwijder eerst alle bestaande data (zowel transacties als configuratie)
               Promise.all([
                   this.apiService.deleteBulk('transaction'),
                   this.apiService.deleteBulk('config')
               ]).then(() => {
-                 // Upload de nieuwe transacties
                  return Promise.all(importedTxs.map(tx => {
-                     // Zorg dat ze het API type hebben en een nieuwe lokale ID voor de POST
+                     // OPGELOST: Voeg 'type' marker correct toe
                      const txWithApiType = { ...tx, type: 'transaction' as const };
                      tx.id = this.generateUUID(); 
-                     return this.apiService.addItem(txWithApiType);
+                     return this.apiService.addItem(txWithApiType as any);
                  }));
               }).then(() => {
                   alert('Data succesvol hersteld en geüpload naar de API!');
@@ -2530,7 +2378,6 @@ export class App {
       r.readAsText(f);
   }
   
-  // loadDummyData aanpassen om data naar API te sturen
   async loadDummyData() {
     if (!confirm("Weet je zeker dat je alle huidige data wilt verwijderen en wilt vervangen door dummy data op de API?")) return;
     
@@ -2541,14 +2388,11 @@ export class App {
     const dummyTxs: Transaction[] = [];
     const today = new Date();
     
-    // 1. Genereer dummy transacties
     for(let i=0; i<80; i++) {
         const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - Math.floor(Math.random() * 365));
         const isIncome = Math.random() > 0.8;
         const cat = isIncome ? 'Salaris' : cats[Math.floor(Math.random() * (cats.length - 1))];
-        const accNum = `NL${Math.floor(Math.random()*99)}BANK0${Math.floor(Math.random()*999999999)}`;
         
-        // OPGELOST: Zorg dat de dummy data de juiste type heeft
         const type: 'income' | 'expense' = isIncome ? 'income' : 'expense';
         
         const tx: Transaction = {
@@ -2558,16 +2402,14 @@ export class App {
             amount: isIncome ? 2500 + Math.floor(Math.random() * 500) : 5 + Math.floor(Math.random() * 200),
             type: type,
             category: cat,
-            accountNumber: accNum,
+            accountNumber: `NL${Math.floor(Math.random()*99)}BANK0${Math.floor(Math.random()*999999999)}`,
             currentBalance: 1000 + Math.floor(Math.random() * 5000),
             tags: Math.random() < 0.2 ? ['zakelijk'] : []
         };
         dummyTxs.push(tx);
     }
     
-    // 2. Genereer dummy regels en configuratie
     const dummyRules: CategorizationRule[] = [
-        // OPGELOST: Type/subType toegevoegd
         { id: this.generateUUID(), keyword: 'albert heijn', category: 'Boodschappen', type: 'config', subType: 'rule' },
         { id: this.generateUUID(), keyword: 'netflix', category: 'Abonnementen', newDescription: 'Netflix Abonnement', type: 'config', subType: 'rule' },
         { id: this.generateUUID(), keyword: 'ns', category: 'Vervoer', type: 'config', subType: 'rule' },
@@ -2587,25 +2429,22 @@ export class App {
         subType: 'manual_categories'
     };
 
-    // 3. Verwijder bestaande data en upload de nieuwe
     try {
-        // Verwijder transacties en de gehele configuratie bulk
         await Promise.all([
             this.apiService.deleteBulk('transaction'),
             this.apiService.deleteBulk('config'),
         ]);
 
-        // Upload de nieuwe data (alles in één batch)
         await Promise.all([
-            // OPGELOST: Voeg 'type' property toe aan Transaction objecten voor API routing
-            ...dummyTxs.map(tx => this.apiService.addItem({ ...tx, type: 'transaction' as const })), 
+            // OPGELOST: Voeg type marker toe en cast naar any om type checks te passeren
+            ...dummyTxs.map(tx => this.apiService.addItem({ ...tx, type: 'transaction' as const } as any)), 
             ...dummyRules.map(rule => this.apiService.addItem(rule)),
             this.apiService.addItem(dummyAccountNames),
             this.apiService.addItem(dummyManualCats),
         ]);
         
         alert("Dummy data succesvol geüpload naar de API!");
-        this.loadAllData(); // Herlaad de app met de nieuwe, gesynchroniseerde data
+        this.loadAllData();
         
     } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
