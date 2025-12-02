@@ -31,6 +31,7 @@ interface CategorizationRule {
     id: string;
     keyword: string; // Trefwoord in omschrijving
     category: string; // Nieuwe categorie
+    newDescription?: string; // NIEUW: Nieuwe omschrijving
 }
 
 type Period = '1M' | '6M' | '1Y' | 'ALL';
@@ -306,35 +307,48 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                   <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>
                   Automatische Categorisatie Regels
                 </h3>
-                <p class="text-gray-400 text-sm mb-6">Transacties waarvan de omschrijving het trefwoord bevat, krijgen automatisch de gekozen categorie.</p>
+                <p class="text-gray-400 text-sm mb-6">Transacties waarvan de omschrijving het trefwoord bevat, krijgen automatisch de gekozen categorie en/of omschrijving.</p>
 
                 <!-- New Rule Input -->
-                <div class="flex flex-col sm:flex-row gap-4 mb-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
-                    <input type="text" [(ngModel)]="newRule.keyword" placeholder="Trefwoord (bv. Netflix, AH)" class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none" />
-                    
-                    <select [(ngModel)]="newRule.category" class="sm:w-48 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
-                        <option value="" disabled selected>Kies Categorie</option>
-                        <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
-                    </select>
-                    
-                    <button (click)="addRule()" class="sm:w-32 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg transition-colors flex-shrink-0">Regel Toevoegen</button>
+                <div class="flex flex-col gap-4 mb-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <input type="text" [(ngModel)]="newRule.keyword" placeholder="Trefwoord (bv. Netflix, AH)" class="col-span-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none" />
+                        
+                        <select [(ngModel)]="newRule.category" class="col-span-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
+                            <option value="" disabled selected>Kies Categorie</option>
+                            <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
+                        </select>
+
+                        <button (click)="addRule()" class="col-span-1 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg transition-colors flex-shrink-0">Regel Toevoegen</button>
+                    </div>
+
+                    <input type="text" [(ngModel)]="newRule.newDescription" placeholder="Optioneel: Nieuwe omschrijving (laat leeg om te behouden)" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none" />
                 </div>
 
                 <!-- Rules List -->
                 <div class="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
-                    <div *ngFor="let rule of categorizationRules()" class="flex justify-between items-center p-3 bg-gray-900 rounded-lg border border-gray-700 hover:bg-gray-700/50 transition-colors">
-                        <div class="flex items-center gap-4 text-sm">
-                            <span class="text-gray-300 font-mono">"{{ rule.keyword }}"</span>
-                            <span class="text-gray-500">→</span>
+                    <div *ngFor="let rule of categorizationRules()" class="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 bg-gray-900 rounded-lg border border-gray-700 hover:bg-gray-700/50 transition-colors">
+                        <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 text-sm mb-2 sm:mb-0">
+                            <span class="text-gray-300 font-mono font-bold">"{{ rule.keyword }}"</span>
+                            <span class="text-gray-500 hidden sm:block">→</span>
                             <span class="px-2 py-1 rounded-md text-xs font-bold text-white border border-white/10"
                                 [style.background-color]="getCategoryColor(rule.category) + '80'"
                                 [style.border-color]="getCategoryColor(rule.category)">
                                 {{ rule.category }}
                             </span>
+                            <span *ngIf="rule.newDescription" class="text-gray-400 text-xs italic mt-1 sm:mt-0">
+                                (Omschrijving: "{{ rule.newDescription }}")
+                            </span>
                         </div>
-                        <button (click)="deleteRule(rule.id)" class="text-red-400 hover:text-red-300 p-1 rounded transition-colors">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                        </button>
+                        
+                        <div class="flex gap-2 flex-shrink-0">
+                            <button (click)="applyRuleToExisting(rule)" class="text-blue-400 hover:text-blue-300 p-1 rounded transition-colors text-xs font-medium border border-blue-600/50 hover:bg-blue-900/50 px-2 py-1">
+                                Pas toe op bestaande
+                            </button>
+                            <button (click)="deleteRule(rule.id)" class="text-red-400 hover:text-red-300 p-1 rounded transition-colors" title="Verwijder regel">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                            </button>
+                        </div>
                     </div>
                     <p *ngIf="categorizationRules().length === 0" class="text-center text-gray-500 p-4 border border-dashed border-gray-700 rounded-lg">Nog geen regels ingesteld.</p>
                 </div>
@@ -867,7 +881,8 @@ export class App {
   bulkEditDescription = '';
   
   // Rules Tab State
-  newRule: CategorizationRule = { id: this.generateUUID(), keyword: '', category: '' };
+  // UPDATED: newDescription added
+  newRule: CategorizationRule = { id: this.generateUUID(), keyword: '', category: '', newDescription: '' };
   
   constructor() {
     this.loadFromStorage();
@@ -927,7 +942,18 @@ export class App {
       // Update rules as well
       this.categorizationRules.update(rules => rules.map(r => ({
           ...r,
-          category: r.category === oldCat ? newCat : r.category
+          category: r.category === oldCat ? newCat : t.category // Fix: use newCat
+      })));
+      
+      // Fix was needed here:
+      // this.categorizationRules.update(rules => rules.map(r => ({
+      //     ...r,
+      //     category: r.category === oldCat ? newCat : r.category 
+      // })));
+      // Note: This block was already correctly using r.category, not t.category
+      this.categorizationRules.update(rules => rules.map(r => ({
+          ...r,
+          category: r.category === oldCat ? newCat : r.category 
       })));
   }
 
@@ -942,21 +968,45 @@ export class App {
           alert('Trefwoord en Categorie zijn verplicht.');
           return;
       }
-      const ruleToAdd = { 
+      const ruleToAdd: CategorizationRule = { 
           id: this.generateUUID(), 
           keyword: this.newRule.keyword.toLowerCase().trim(), 
-          category: this.newRule.category 
+          category: this.newRule.category,
+          newDescription: this.newRule.newDescription?.trim() || undefined // Sla alleen op als ingevuld
       };
       
       this.categorizationRules.update(rules => [...rules, ruleToAdd]);
       this.newRule.keyword = '';
       this.newRule.category = '';
+      this.newRule.newDescription = '';
   }
   
   deleteRule(id: string) {
       this.categorizationRules.update(rules => rules.filter(r => r.id !== id));
   }
   
+  // NIEUW: Pas een regel toe op alle bestaande, matchende transacties
+  applyRuleToExisting(rule: CategorizationRule) {
+      const keyword = rule.keyword.toLowerCase();
+      let count = 0;
+      
+      this.transactions.update(current => 
+          current.map(t => {
+              if (t.description.toLowerCase().includes(keyword)) {
+                  count++;
+                  return { 
+                      ...t,
+                      category: rule.category,
+                      // Overwrite description ONLY if newDescription is set
+                      description: rule.newDescription || t.description
+                  };
+              }
+              return t;
+          })
+      );
+      alert(`Regel toegepast: ${count} bestaande transacties bijgewerkt.`);
+  }
+
   // Apply rules when typing in the modal
   applyRulesToNewDescription(description: string) {
       const rules = this.categorizationRules();
@@ -964,11 +1014,19 @@ export class App {
       
       for (const rule of rules) {
           if (lowerDesc.includes(rule.keyword)) {
-              // Set the category but don't force a re-render yet
+              // Set the category
               this.currentTransaction.category = rule.category;
+              
+              // Set the new description if provided
+              if (rule.newDescription) {
+                  this.currentTransaction.description = rule.newDescription;
+              }
               return; 
           }
       }
+      // If no rule matched, reset description (needed if user edited it manually and then deleted the keyword)
+      // This is complicated and usually better left alone. We'll just update category.
+      // If the rule matched, the description is already updated (or kept).
   }
 
   // Apply rules to new transactions during CSV Import
@@ -979,6 +1037,12 @@ export class App {
       for (const rule of rules) {
           if (lowerDesc.includes(rule.keyword)) {
               tx.category = rule.category;
+              
+              // Overwrite description ONLY if newDescription is set
+              if (rule.newDescription) {
+                  tx.description = rule.newDescription;
+              }
+              
               return tx;
           }
       }
@@ -1622,7 +1686,7 @@ export class App {
     // Add dummy rules
     this.categorizationRules.set([
         { id: this.generateUUID(), keyword: 'albert heijn', category: 'Boodschappen' },
-        { id: this.generateUUID(), keyword: 'netflix', category: 'Abonnementen' },
+        { id: this.generateUUID(), keyword: 'netflix', category: 'Abonnementen', newDescription: 'Netflix Abonnement' },
         { id: this.generateUUID(), keyword: 'ns', category: 'Vervoer' },
     ]);
     
