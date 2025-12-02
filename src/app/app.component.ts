@@ -1,4 +1,4 @@
-import { Component, computed, effect, signal, ViewEncapsulation, ElementRef, ViewChild } from '@angular/core';
+import { Component, computed, effect, signal, ViewEncapsulation } from '@angular/core';
 import { CommonModule, DatePipe, CurrencyPipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -16,7 +16,7 @@ interface CsvMapping {
   dateCol: number;
   descCol: number;
   amountCol: number;
-  categoryCol?: number; // Optioneel
+  categoryCol?: number;
 }
 
 type Period = '1M' | '6M' | '1Y' | 'ALL';
@@ -117,6 +117,15 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     <td class="p-4 text-right font-bold text-white bg-gray-900/20 border-l border-gray-700 font-mono">
                       {{ getMatrixRowTotal(cat) | currency:'EUR':'symbol':'1.0-0' }}
                     </td>
+                  </tr>
+                  <!-- Totalen Rij -->
+                  <tr class="bg-gray-900 font-bold border-t-2 border-gray-600">
+                    <td class="p-4 sticky left-0 bg-gray-900 border-r border-gray-700 text-blue-400">Totaal per Maand</td>
+                    <td *ngFor="let m of matrixData().months" class="p-4 text-right font-mono"
+                        [ngClass]="getMonthTotal(m) >= 0 ? 'text-green-400' : 'text-red-400'">
+                      {{ getMonthTotal(m) | currency:'EUR':'symbol':'1.0-0' }}
+                    </td>
+                    <td class="p-4 bg-gray-900 border-l border-gray-700"></td>
                   </tr>
                 </tbody>
               </table>
@@ -261,19 +270,21 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-sm">
             <div class="relative">
                <svg class="absolute left-3 top-3 h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+               <!-- FIXED: Using [ngModel] and (ngModelChange) with signals -->
                <input 
                 type="text" 
                 placeholder="Zoek op omschrijving..." 
-                [(ngModel)]="searchTerm"
+                [ngModel]="searchTerm()" 
+                (ngModelChange)="searchTerm.set($event)"
                 class="w-full bg-gray-900 border border-gray-600 text-white rounded-lg pl-10 pr-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow">
             </div>
             
-            <select [(ngModel)]="categoryFilter" class="bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
+            <select [ngModel]="categoryFilter()" (ngModelChange)="categoryFilter.set($event)" class="bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
               <option value="ALL">Alle Categorieën</option>
               <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
             </select>
 
-            <select [(ngModel)]="typeFilter" class="bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
+            <select [ngModel]="typeFilter()" (ngModelChange)="typeFilter.set($event)" class="bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
               <option value="ALL">Alle Types</option>
               <option value="income">Inkomsten</option>
               <option value="expense">Uitgaven</option>
@@ -307,11 +318,11 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                       {{ (t.type === 'income' ? '+' : '-') }} {{ t.amount | currency:'EUR':'symbol':'1.2-2' }}
                     </td>
                     <td class="p-4 text-right">
-                      <div class="flex justify-end gap-2 opacity-50 group-hover:opacity-100 transition-opacity">
-                         <button (click)="editTransaction(t)" class="p-1 hover:bg-blue-900/50 rounded text-blue-400" title="Bewerken">
+                      <div class="flex justify-end gap-2 opacity-100 transition-opacity">
+                         <button (click)="$event.stopPropagation(); editTransaction(t)" class="p-1 hover:bg-blue-900/50 rounded text-blue-400 cursor-pointer" title="Bewerken">
                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                          </button>
-                         <button (click)="deleteTransaction(t.id)" class="p-1 hover:bg-red-900/50 rounded text-red-400" title="Verwijderen">
+                         <button (click)="$event.stopPropagation(); deleteTransaction(t.id)" class="p-1 hover:bg-red-900/50 rounded text-red-400 cursor-pointer" title="Verwijderen">
                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                          </button>
                       </div>
@@ -529,12 +540,19 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
              
              <div class="mb-4 bg-gray-900 p-3 rounded-lg text-sm text-gray-300 border border-gray-700">
                 <span class="block text-xs text-gray-500 uppercase">Huidig Filter:</span>
-                <span class="italic">"{{ searchTerm || 'Alles' }}"</span>
+                <span class="italic">"{{ searchTerm() || 'Alles' }}"</span>
              </div>
 
              <div class="mb-6">
                 <label class="block text-sm font-medium text-gray-400 mb-1">Nieuwe Categorie</label>
-                <input type="text" list="categories" [(ngModel)]="bulkEditCategory" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500" placeholder="Kies categorie...">
+                <!-- FIXED: Dropdown for Bulk Edit -->
+                <select [(ngModel)]="bulkEditCategory" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 appearance-none">
+                  <option value="" disabled selected>Kies een categorie...</option>
+                  <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
+                  <option value="NEW">+ Nieuwe Categorie (Typ in lijst)</option>
+                </select>
+                <!-- Fallback input if they select NEW or want to type -->
+                <input *ngIf="bulkEditCategory === 'NEW'" type="text" [(ngModel)]="bulkEditCustomCategory" placeholder="Typ nieuwe categorie..." class="mt-2 w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500">
              </div>
 
              <div class="flex justify-end gap-2">
@@ -570,10 +588,10 @@ export class App {
   // Data
   transactions = signal<Transaction[]>([]);
   
-  // Transaction List Filters
-  searchTerm = '';
-  categoryFilter = 'ALL';
-  typeFilter = 'ALL';
+  // Transaction List Filters (Now Signals!)
+  searchTerm = signal('');
+  categoryFilter = signal('ALL');
+  typeFilter = signal('ALL');
 
   // Stats State
   statsPeriod = signal<Period>('6M');
@@ -594,6 +612,7 @@ export class App {
   // Bulk Edit State
   showBulkEditModal = false;
   bulkEditCategory = '';
+  bulkEditCustomCategory = '';
 
   constructor() {
     this.loadFromStorage();
@@ -604,14 +623,20 @@ export class App {
 
   // --- COMPUTES ---
 
-  // Main Filter Logic (Used for Transactions List & Bulk Edit)
+  // Main Filter Logic (Updated to use signals correctly)
   filteredTransactions = computed(() => {
+    // We read signals here: this.searchTerm(), this.categoryFilter(), etc.
+    // Because we read them, Angular knows to re-run this function when they change.
+    const term = this.searchTerm().toLowerCase();
+    const catFilter = this.categoryFilter();
+    const tFilter = this.typeFilter();
+
     return this.transactions()
       .filter(t => {
-        const matchesSearch = t.description.toLowerCase().includes(this.searchTerm.toLowerCase()) || 
-                              t.category.toLowerCase().includes(this.searchTerm.toLowerCase());
-        const matchesCat = this.categoryFilter === 'ALL' || t.category === this.categoryFilter;
-        const matchesType = this.typeFilter === 'ALL' || t.type === this.typeFilter;
+        const matchesSearch = t.description.toLowerCase().includes(term) || 
+                              t.category.toLowerCase().includes(term);
+        const matchesCat = catFilter === 'ALL' || t.category === catFilter;
+        const matchesType = tFilter === 'ALL' || t.type === tFilter;
         return matchesSearch && matchesCat && matchesType;
       })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -623,7 +648,7 @@ export class App {
     return Array.from(cats).sort();
   });
 
-  // Top Cards Stats (Always Year-to-Date for consistency or make them respond to statsPeriod? Let's keep YTD)
+  // Top Cards Stats
   totalStats = computed(() => {
     const now = new Date();
     const currentYear = now.getFullYear();
@@ -633,7 +658,7 @@ export class App {
     return { income, expense, balance: income - expense };
   });
 
-  // Matrix Data (Dashboard - Last 6 months hardcoded)
+  // Matrix Data
   matrixData = computed(() => {
     const data = this.transactions();
     const today = new Date();
@@ -651,7 +676,6 @@ export class App {
 
   // --- STATS CHARTS COMPUTES ---
   
-  // 1. Filter transactions based on selected Stats Period
   statsFilteredData = computed(() => {
     const all = this.transactions().sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     const period = this.statsPeriod();
@@ -666,10 +690,9 @@ export class App {
     return all.filter(t => new Date(t.date) >= cutoff);
   });
 
-  // 2. Bar Chart Data (Expenses per Month)
   barChartData = computed(() => {
     const txs = this.statsFilteredData();
-    const buckets = new Map<string, number>(); // "YYYY-MM" -> total
+    const buckets = new Map<string, number>(); 
     
     txs.forEach(t => {
       if (t.type === 'expense') {
@@ -678,10 +701,9 @@ export class App {
       }
     });
 
-    // Fill missing months if needed, but for simplicity let's just sort keys
     const sortedKeys = Array.from(buckets.keys()).sort();
     const data = sortedKeys.map(key => ({
-       label: key.slice(5), // "MM"
+       label: key.slice(5), 
        fullLabel: key,
        value: buckets.get(key) || 0
     }));
@@ -690,20 +712,12 @@ export class App {
     return data.map(d => ({ ...d, pct: (d.value / max) * 100 }));
   });
 
-  // 3. Line Chart Data (Running Balance)
   lineChartData = computed(() => {
     const txs = this.statsFilteredData();
-    // Group by day to reduce points? Or just every transaction? Let's group by day.
-    const dailyBalance = new Map<string, number>(); // "YYYY-MM-DD" -> balance at end of day
-    
-    let running = 0;
-    // Calculate initial balance before this period if 'ALL' is not selected? 
-    // Complexity warning. Let's just show cumulative change IN this period.
-    
     const sortedTxs = [...txs].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
     
     const points: {x: number, y: number, label: string, value: number}[] = [];
-    const groupedByDay = new Map<string, number>(); // Day -> Net Change
+    const groupedByDay = new Map<string, number>();
     
     sortedTxs.forEach(t => {
         const d = t.date;
@@ -719,14 +733,13 @@ export class App {
     days.forEach((day, index) => {
         cumulative += groupedByDay.get(day)!;
         points.push({
-            x: 0, // calc later
-            y: 0, // calc later
-            label: day.slice(5), // MM-DD
+            x: 0, 
+            y: 0, 
+            label: day.slice(5), 
             value: cumulative
         });
     });
 
-    // Normalize X and Y to 0-100%
     const minVal = Math.min(0, ...points.map(p => p.value));
     const maxVal = Math.max(0, ...points.map(p => p.value));
     const range = maxVal - minVal || 1;
@@ -734,7 +747,7 @@ export class App {
     return points.map((p, i) => ({
         ...p,
         x: (i / (points.length - 1 || 1)) * 100,
-        y: 100 - ((p.value - minVal) / range) * 100 // Invert Y because SVG 0 is top
+        y: 100 - ((p.value - minVal) / range) * 100
     }));
   });
 
@@ -742,7 +755,6 @@ export class App {
       return this.lineChartData().map(p => `${p.x},${p.y}`).join(' ');
   });
 
-  // 4. Pie Chart Data
   pieChartData = computed(() => {
     const txs = this.statsFilteredData().filter(t => t.type === 'expense');
     const totals = new Map<string, number>();
@@ -757,7 +769,7 @@ export class App {
     let colorIdx = 0;
 
     return Array.from(totals.entries())
-      .sort((a, b) => b[1] - a[1]) // Sort desc
+      .sort((a, b) => b[1] - a[1]) 
       .map(([cat, val]) => ({
           label: cat,
           value: val,
@@ -791,17 +803,25 @@ export class App {
   // Bulk Edit
   openBulkEdit() {
       this.bulkEditCategory = '';
+      this.bulkEditCustomCategory = '';
       this.showBulkEditModal = true;
   }
   
   applyBulkEdit() {
-      if (!this.bulkEditCategory) return;
+      // Determine final category (Dropdown or Custom Input)
+      let finalCat = this.bulkEditCategory;
+      if (finalCat === 'NEW') {
+        finalCat = this.bulkEditCustomCategory;
+      }
+
+      if (!finalCat) return;
+
       const filteredIds = this.filteredTransactions().map(t => t.id);
       
       this.transactions.update(current => 
          current.map(t => {
              if (filteredIds.includes(t.id)) {
-                 return { ...t, category: this.bulkEditCategory };
+                 return { ...t, category: finalCat };
              }
              return t;
          })
@@ -818,21 +838,18 @@ export class App {
     const reader = new FileReader();
     reader.onload = (e: any) => {
         const text = e.target.result;
-        // Simple Parser: split by newline, then comma or semicolon
         const lines = text.split(/\r?\n/).filter((l:string) => l.trim() !== '');
         if (lines.length < 2) { alert('Leeg of ongeldig bestand'); return; }
 
-        // Detect separator
         const firstLine = lines[0];
         const separator = firstLine.includes(';') ? ';' : ',';
 
         this.csvRawData = lines.map((l:string) => {
-            // Handle quotes crudely
             return l.split(separator).map(val => val.replace(/^"|"$/g, '').trim());
         });
 
         this.csvPreviewHeaders = this.csvRawData[0];
-        this.csvPreviewRow = this.csvRawData[1] || []; // First data row for preview
+        this.csvPreviewRow = this.csvRawData[1] || []; 
         this.showCsvModal = true;
     };
     reader.readAsText(file);
@@ -840,7 +857,7 @@ export class App {
 
   processCsvImport() {
       const { dateCol, descCol, amountCol } = this.csvMapping;
-      const dataRows = this.csvRawData.slice(1); // Skip header
+      const dataRows = this.csvRawData.slice(1); 
       const newTxs: Transaction[] = [];
       let skipped = 0;
 
@@ -849,24 +866,18 @@ export class App {
 
           try {
               let amountStr = row[amountCol];
-              // Handle currency formats (Dutch vs US: 1.000,00 vs 1,000.00)
-              // Crude normalize: remove dots, replace comma with dot
               amountStr = amountStr.replace(/\./g, '').replace(',', '.');
               let amount = parseFloat(amountStr);
               
               if (isNaN(amount)) { skipped++; return; }
 
-              // Simple date parsing. Assumes ISO or DD-MM-YYYY or MM/DD/YYYY
               let dateRaw = row[dateCol];
               let date = new Date(dateRaw).toISOString().slice(0, 10);
               if (dateRaw.includes('-') && dateRaw.split('-')[0].length === 2) {
-                   // DD-MM-YYYY likely
                    const parts = dateRaw.split('-');
                    date = `${parts[2]}-${parts[1]}-${parts[0]}`;
               }
 
-              const isIncome = amount > 0;
-              // Some banks use negative for expense. We store absolute amount + type.
               const type = amount >= 0 ? 'income' : 'expense';
 
               newTxs.push({
@@ -875,7 +886,7 @@ export class App {
                   description: row[descCol],
                   amount: Math.abs(amount),
                   type: type,
-                  category: 'Onbekend' // Default
+                  category: 'Onbekend' 
               });
           } catch (e) {
               skipped++;
@@ -914,6 +925,12 @@ export class App {
   getMatrixRowTotal(category: string): number {
     const months = this.matrixData().months;
     return this.transactions().filter(t => t.category === category && months.includes(t.date.slice(0, 7))).reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
+  }
+  // NEW: Total per Month Helper
+  getMonthTotal(month: string): number {
+    return this.transactions()
+      .filter(t => t.date.startsWith(month))
+      .reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
   }
 
   // Backup
