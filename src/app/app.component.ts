@@ -12,6 +12,7 @@ interface Transaction {
   category: string;
   accountNumber?: string;
   currentBalance?: number; // Veld: Saldo na transactie
+  tags?: string[]; // NIEUW: Tags
 }
 
 interface CsvMapping {
@@ -31,7 +32,7 @@ interface CategorizationRule {
     id: string;
     keyword: string; // Trefwoord in omschrijving
     category: string; // Nieuwe categorie
-    newDescription?: string; // NIEUW: Nieuwe omschrijving
+    newDescription?: string; // Nieuwe omschrijving
 }
 
 type Period = '1M' | '6M' | '1Y' | 'ALL';
@@ -293,7 +294,42 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 </div>
               </div>
             </div>
+            
+            <!-- 4. Uitschieters (Trends/Afwijkingen) -->
+            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg lg:col-span-2">
+                <h3 class="text-lg font-semibold mb-6 flex items-center gap-2">
+                    <span class="w-2 h-6 bg-yellow-500 rounded-full"></span>
+                    Opvallende Afwijkingen (t.o.v. laatste 3 maanden)
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div *ngIf="trendAnalysis().high.length > 0" class="space-y-3 bg-gray-900 p-4 rounded-lg border border-gray-700">
+                        <h4 class="font-bold text-red-400 flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                            Grote Stijgers (Meer dan 20%)
+                        </h4>
+                        <div *ngFor="let item of trendAnalysis().high" class="flex justify-between text-sm">
+                            <span class="text-gray-300 font-medium">{{ item.category }}</span>
+                            <span class="font-mono text-red-300">{{ item.diff | currency:'EUR':'symbol':'1.0-0' }} <span class="text-xs">({{ item.pctChange }}%)</span></span>
+                        </div>
+                    </div>
+                    
+                    <div *ngIf="trendAnalysis().low.length > 0" class="space-y-3 bg-gray-900 p-4 rounded-lg border border-gray-700">
+                         <h4 class="font-bold text-green-400 flex items-center gap-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"></path></svg>
+                            Grote Dalers/Besparingen
+                        </h4>
+                        <div *ngFor="let item of trendAnalysis().low" class="flex justify-between text-sm">
+                            <span class="text-gray-300 font-medium">{{ item.category }}</span>
+                            <span class="font-mono text-green-300">{{ item.diff | currency:'EUR':'symbol':'1.0-0' }} <span class="text-xs">({{ item.pctChange }}%)</span></span>
+                        </div>
+                    </div>
 
+                    <p *ngIf="trendAnalysis().low.length === 0 && trendAnalysis().high.length === 0" class="text-gray-500 italic p-4 col-span-2 text-center">
+                        Geen opvallende afwijkingen gevonden vergeleken met het gemiddelde van de afgelopen 3 maanden.
+                    </p>
+                </div>
+            </div>
+            
           </div>
         </div>
 
@@ -316,7 +352,8 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                         
                         <select [(ngModel)]="newRule.category" class="col-span-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
                             <option value="" disabled selected>Kies Categorie</option>
-                            <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
+                            <!-- UPDATED: Use allCategories which includes temporary categories -->
+                            <option *ngFor="let cat of allCategories()" [value]="cat">{{ cat }}</option>
                         </select>
 
                         <button (click)="addRule()" class="col-span-1 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg transition-colors flex-shrink-0">Regel Toevoegen</button>
@@ -362,17 +399,27 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 </h3>
                 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <!-- Categorie Rename/Delete -->
+                    <!-- Categorie Rename/Delete/ADD -->
                     <div class="bg-gray-900 p-4 rounded-lg border border-gray-700 space-y-3">
-                        <h4 class="text-sm font-semibold text-gray-300">Aanwezige Categorieën</h4>
-                        <div *ngFor="let cat of uniqueCategories()" class="flex justify-between items-center text-sm p-1 hover:bg-gray-700/50 rounded">
-                           <div class="flex items-center gap-2">
-                               <span class="w-3 h-3 rounded-full flex-shrink-0" [style.background-color]="getCategoryColor(cat)"></span>
-                               <span class="text-gray-300 truncate">{{ cat }}</span>
-                           </div>
-                           <button (click)="renameCategory(cat)" class="text-blue-400 hover:text-blue-300 p-1" title="Hernoem">
-                               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.536L15.232 5.232z"></path></svg>
-                           </button>
+                        <h4 class="text-sm font-semibold text-gray-300 mb-2">Aanwezige Categorieën</h4>
+                        
+                        <!-- New Category Input -->
+                        <div class="flex gap-2">
+                            <input type="text" [(ngModel)]="newCategoryName" placeholder="Nieuwe categorie naam" class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1 text-white text-sm focus:ring-blue-500">
+                            <button (click)="addManualCategory()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-sm transition-colors flex-shrink-0">Voeg toe</button>
+                        </div>
+
+                        <!-- List -->
+                        <div class="space-y-1 max-h-40 overflow-y-auto custom-scrollbar pt-2">
+                            <div *ngFor="let cat of allCategories()" class="flex justify-between items-center text-sm p-1 hover:bg-gray-700/50 rounded">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-3 h-3 rounded-full flex-shrink-0" [style.background-color]="getCategoryColor(cat)"></span>
+                                    <span class="text-gray-300 truncate">{{ cat }}</span>
+                                </div>
+                                <button (click)="renameCategory(cat)" class="text-blue-400 hover:text-blue-300 p-1" title="Hernoem">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.536L15.232 5.232z"></path></svg>
+                                </button>
+                            </div>
                         </div>
                     </div>
 
@@ -399,13 +446,18 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
           <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <h2 class="text-2xl font-bold">Transacties</h2>
             <div class="flex gap-2">
+              <button *ngIf="filteredTransactions().length > 0" (click)="exportFilteredCsv()" 
+                  class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded-lg flex items-center gap-2 transition-all border border-gray-600">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                  Export ({{filteredTransactions().length}})
+              </button>
               <button *ngIf="filteredTransactions().length > 0" (click)="openBulkEdit()" 
                  class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded-lg flex items-center gap-2 transition-all border border-gray-600">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                   <path d="M17.414 2.586a2 2 0 00-2.828 0L7 9.414V13h3.586l6.828-6.828a2 2 0 000-2.828z" />
                   <path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" />
                 </svg>
-                Bulk Bewerk ({{filteredTransactions().length}})
+                Bulk Bewerk
               </button>
               <button (click)="openModal()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
@@ -417,12 +469,12 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
           </div>
 
           <!-- Filters -->
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-sm">
-            <div class="relative col-span-2 md:col-span-1">
+          <div class="grid grid-cols-2 md:grid-cols-6 gap-4 bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-sm">
+            <div class="relative col-span-2 md:col-span-2">
                <svg class="absolute left-3 top-3 h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                <input 
                 type="text" 
-                placeholder="Zoek omschrijving/cat..." 
+                placeholder="Zoek omschrijving/cat/tag..." 
                 [ngModel]="searchTerm()" 
                 (ngModelChange)="searchTerm.set($event)"
                 class="w-full bg-gray-900 border border-gray-600 text-white rounded-lg pl-10 pr-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
@@ -430,7 +482,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
             
             <select [ngModel]="categoryFilter()" (ngModelChange)="categoryFilter.set($event)" class="bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer text-sm">
               <option value="ALL">Alle Categorieën</option>
-              <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
+              <option *ngFor="let cat of allCategories()" [value]="cat">{{ cat }}</option>
             </select>
 
             <select [ngModel]="typeFilter()" (ngModelChange)="typeFilter.set($event)" class="bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer text-sm">
@@ -443,6 +495,13 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 <option value="ALL">Alle Rekeningen</option>
                 <option *ngFor="let acc of uniqueAccountNumbers()" [value]="acc">{{ getAccountName(acc) }}</option>
             </select>
+            
+            <div class="relative col-span-2 md:col-span-1">
+                <input type="date" [ngModel]="dateFromFilter()" (ngModelChange)="dateFromFilter.set($event)" placeholder="Datum Vanaf" class="w-full bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
+            </div>
+             <div class="relative col-span-2 md:col-span-1">
+                <input type="date" [ngModel]="dateToFilter()" (ngModelChange)="dateToFilter.set($event)" placeholder="Datum Tot" class="w-full bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
+            </div>
           </div>
 
           <!-- List -->
@@ -455,6 +514,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     <th class="p-3 font-semibold">Rekening</th>
                     <th class="p-3 font-semibold">Omschrijving</th>
                     <th class="p-3 font-semibold">Categorie</th>
+                    <th class="p-3 font-semibold">Tags</th>
                     <th class="p-3 font-semibold text-right">Bedrag</th>
                     <th class="p-3 font-semibold text-right">Saldo</th>
                     <th class="p-3 font-semibold text-right min-w-[70px]">Actie</th>
@@ -471,6 +531,12 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                             [style.border-color]="getCategoryColor(t.category)">
                         {{ t.category }}
                       </span>
+                    </td>
+                    <td class="p-3 text-gray-400 text-xs whitespace-nowrap">
+                        <span *ngFor="let tag of t.tags" class="inline-block bg-gray-700 text-gray-300 px-2 py-0.5 rounded-full text-xs mr-1">
+                            #{{ tag }}
+                        </span>
+                        <span *ngIf="!t.tags?.length">-</span>
                     </td>
                     <td class="p-3 text-right font-mono font-bold" 
                         [ngClass]="t.type === 'income' ? 'text-green-400' : 'text-red-400'">
@@ -491,7 +557,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     </td>
                   </tr>
                   <tr *ngIf="filteredTransactions().length === 0">
-                    <td colspan="7" class="p-12 text-center">
+                    <td colspan="8" class="p-12 text-center">
                        <div class="flex flex-col items-center justify-center text-gray-500">
                          <svg class="w-12 h-12 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                          <p>Geen transacties gevonden.</p>
@@ -618,6 +684,16 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                   </div>
                 </div>
 
+                <!-- Tags Input (NIEUW) -->
+                <div>
+                   <label class="block text-sm font-medium text-gray-400 mb-1">Tags (Kommagescheiden, bijv. vakantie, zakelijk)</label>
+                   <input type="text" 
+                       [ngModel]="currentTransaction.tags?.join(', ') || ''" 
+                       (ngModelChange)="handleTagInput($event)"
+                       class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" 
+                       placeholder="#vakantie #zakelijk">
+                </div>
+
                 <!-- Fixed Categorie Selectie (Dropdown + Input) -->
                 <div>
                   <label class="block text-sm font-medium text-gray-400 mb-1">Categorie</label>
@@ -626,7 +702,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                         [ngModel]="isNewCategoryMode ? '__NEW__' : currentTransaction.category" 
                         (ngModelChange)="handleCategoryChange($event)"
                         class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
-                          <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
+                          <option *ngFor="let cat of allCategories()" [value]="cat">{{ cat }}</option>
                           <option disabled>──────────</option>
                           <option value="__NEW__" class="text-blue-400 font-bold">+ Nieuwe Categorie...</option>
                       </select>
@@ -636,7 +712,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                          <input type="text" [(ngModel)]="currentTransaction.category" 
                                 class="w-full bg-gray-800 border border-blue-500 rounded-lg px-4 py-2.5 text-white focus:outline-none" 
                                 placeholder="Typ nieuwe categorie naam...">
-                         <button (click)="isNewCategoryMode = false; currentTransaction.category = uniqueCategories()[0] || 'Algemeen'" class="absolute right-2 top-2 text-xs text-red-400 hover:text-white bg-gray-900 px-2 py-1 rounded">Annuleer</button>
+                         <button (click)="isNewCategoryMode = false; currentTransaction.category = allCategories()[0] || 'Algemeen'" class="absolute right-2 top-2 text-xs text-red-400 hover:text-white bg-gray-900 px-2 py-1 rounded">Annuleer</button>
                       </div>
                   </div>
                 </div>
@@ -775,7 +851,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                   <label class="block text-sm font-medium text-gray-400 mb-1">Nieuwe Categorie</label>
                   <select [(ngModel)]="bulkEditCategory" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 appearance-none">
                     <option value="" disabled selected>Kies een categorie (optioneel)...</option>
-                    <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
+                    <option *ngFor="let cat of allCategories()" [value]="cat">{{ cat }}</option>
                     <option value="NEW">+ Nieuwe Categorie (Typ in lijst)</option>
                   </select>
                   <input *ngIf="bulkEditCategory === 'NEW'" type="text" [(ngModel)]="bulkEditCustomCategory" placeholder="Typ nieuwe categorie..." class="mt-2 w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500">
@@ -842,9 +918,10 @@ export class App {
   transactions = signal<Transaction[]>([]);
   mappingTemplates = signal<CsvMappingTemplate[]>([]);
   categorizationRules = signal<CategorizationRule[]>([]); // NIEUW: Regels
+  manualCategories = signal<string[]>([]); // NIEUW: Handmatig toegevoegde categorieën
   
   // Account/Category names lookup
-  accountNames = signal<Record<string, string>>({}); // NIEUW: Vriendelijke namen voor rekeningen
+  accountNames = signal<Record<string, string>>({}); // Vriendelijke namen voor rekeningen
   
   // Dashboard Navigation State
   dashboardMonthOffset = signal(0);
@@ -853,7 +930,9 @@ export class App {
   searchTerm = signal('');
   categoryFilter = signal('ALL');
   typeFilter = signal('ALL');
-  accountFilter = signal('ALL'); // NIEUW: Filter op rekeningnummer
+  accountFilter = signal('ALL');
+  dateFromFilter = signal(''); // NIEUW: Datum Vanaf
+  dateToFilter = signal(''); // NIEUW: Datum Tot
 
   // Stats State
   statsPeriod = signal<Period>('6M');
@@ -881,14 +960,17 @@ export class App {
   bulkEditDescription = '';
   
   // Rules Tab State
-  // UPDATED: newDescription added
   newRule: CategorizationRule = { id: this.generateUUID(), keyword: '', category: '', newDescription: '' };
+
+  // Category Management State
+  newCategoryName = ''; // Voor handmatig toevoegen op Regels pagina
   
   constructor() {
     this.loadFromStorage();
     this.loadMappingTemplates();
-    this.loadRules(); // Load rules
-    this.loadAccountNames(); // Load account names
+    this.loadRules(); 
+    this.loadAccountNames(); 
+    this.loadManualCategories(); // NIEUW: Laad handmatige categorieën
     
     // Save data on change
     effect(() => {
@@ -905,6 +987,10 @@ export class App {
     // Save account names on change
     effect(() => {
         try { localStorage.setItem('financeAccountNames', JSON.stringify(this.accountNames())); } catch (e) {}
+    });
+    // Save manual categories on change (NIEUW)
+    effect(() => {
+        try { localStorage.setItem('financeManualCategories', JSON.stringify(this.manualCategories())); } catch (e) {}
     });
   }
 
@@ -930,6 +1016,30 @@ export class App {
   });
   
   // Categories
+  loadManualCategories() {
+      try { const cats = localStorage.getItem('financeManualCategories'); if (cats) this.manualCategories.set(JSON.parse(cats)); } catch (e) {}
+  }
+
+  // Nieuwe categorie handmatig toevoegen
+  addManualCategory() {
+    const name = this.newCategoryName.trim();
+    if (!name) return;
+    if (this.allCategories().includes(name)) {
+        alert(`Categorie "${name}" bestaat al.`);
+        return;
+    }
+    this.manualCategories.update(cats => [...cats, name]);
+    this.newCategoryName = '';
+    alert(`Categorie "${name}" toegevoegd.`);
+  }
+
+  // Combineert gebruikte categorieën en handmatige categorieën
+  allCategories = computed(() => {
+      const usedCats = new Set(this.transactions().map(t => t.category));
+      this.manualCategories().forEach(cat => usedCats.add(cat));
+      return Array.from(usedCats).sort();
+  });
+  
   renameCategory(oldCat: string) {
       const newCat = prompt(`Hernoem categorie "${oldCat}" naar:`);
       if (!newCat || newCat === oldCat) return;
@@ -939,25 +1049,17 @@ export class App {
           category: t.category === oldCat ? newCat : t.category
       })));
       
-      // Update rules as well
-      this.categorizationRules.update(rules => rules.map(r => ({
-          ...r,
-          category: r.category === oldCat ? newCat : t.category // Fix: use newCat
-      })));
-      
-      // Fix was needed here:
-      // this.categorizationRules.update(rules => rules.map(r => ({
-      //     ...r,
-      //     category: r.category === oldCat ? newCat : r.category 
-      // })));
-      // Note: This block was already correctly using r.category, not t.category
+      // Update rules
       this.categorizationRules.update(rules => rules.map(r => ({
           ...r,
           category: r.category === oldCat ? newCat : r.category 
       })));
+
+      // Update manual list
+      this.manualCategories.update(cats => cats.map(cat => cat === oldCat ? newCat : cat).filter(c => c !== oldCat));
   }
 
-  // --- AUTOMATIC CATEGORIZATION RULES (1) ---
+  // --- AUTOMATIC CATEGORIZATION RULES ---
   
   loadRules() {
       try { const rules = localStorage.getItem('financeRules'); if (rules) this.categorizationRules.set(JSON.parse(rules)); } catch (e) {}
@@ -985,7 +1087,7 @@ export class App {
       this.categorizationRules.update(rules => rules.filter(r => r.id !== id));
   }
   
-  // NIEUW: Pas een regel toe op alle bestaande, matchende transacties
+  // Pas een regel toe op alle bestaande, matchende transacties
   applyRuleToExisting(rule: CategorizationRule) {
       const keyword = rule.keyword.toLowerCase();
       let count = 0;
@@ -997,7 +1099,6 @@ export class App {
                   return { 
                       ...t,
                       category: rule.category,
-                      // Overwrite description ONLY if newDescription is set
                       description: rule.newDescription || t.description
                   };
               }
@@ -1014,19 +1115,13 @@ export class App {
       
       for (const rule of rules) {
           if (lowerDesc.includes(rule.keyword)) {
-              // Set the category
               this.currentTransaction.category = rule.category;
-              
-              // Set the new description if provided
               if (rule.newDescription) {
                   this.currentTransaction.description = rule.newDescription;
               }
               return; 
           }
       }
-      // If no rule matched, reset description (needed if user edited it manually and then deleted the keyword)
-      // This is complicated and usually better left alone. We'll just update category.
-      // If the rule matched, the description is already updated (or kept).
   }
 
   // Apply rules to new transactions during CSV Import
@@ -1038,7 +1133,6 @@ export class App {
           if (lowerDesc.includes(rule.keyword)) {
               tx.category = rule.category;
               
-              // Overwrite description ONLY if newDescription is set
               if (rule.newDescription) {
                   tx.description = rule.newDescription;
               }
@@ -1139,23 +1233,36 @@ export class App {
 
   // --- COMPUTES ---
 
-  // Main Filter Logic (Updated to include accountFilter)
+  // Main Filter Logic (Updated with Tags and Dates)
   filteredTransactions = computed(() => {
     const term = this.searchTerm().toLowerCase();
     const catFilter = this.categoryFilter();
     const tFilter = this.typeFilter();
-    const aFilter = this.accountFilter(); // NIEUW
+    const aFilter = this.accountFilter();
+    const dateFrom = this.dateFromFilter();
+    const dateTo = this.dateToFilter();
 
-    return this.transactions()
+    let filtered = this.transactions()
       .filter(t => {
+        // Search term (updated to include tags)
+        const tagsString = t.tags?.join(' ').toLowerCase() || '';
         const matchesSearch = t.description.toLowerCase().includes(term) || 
-                              t.category.toLowerCase().includes(term);
+                              t.category.toLowerCase().includes(term) ||
+                              tagsString.includes(term); 
+                              
         const matchesCat = catFilter === 'ALL' || t.category === catFilter;
         const matchesType = tFilter === 'ALL' || t.type === tFilter;
-        const matchesAccount = aFilter === 'ALL' || t.accountNumber === aFilter; // NIEUW
-        return matchesSearch && matchesCat && matchesType && matchesAccount;
+        const matchesAccount = aFilter === 'ALL' || t.accountNumber === aFilter;
+        
+        // Date filtering
+        const matchesDateFrom = !dateFrom || t.date >= dateFrom;
+        const matchesDateTo = !dateTo || t.date <= dateTo;
+        
+        return matchesSearch && matchesCat && matchesType && matchesAccount && matchesDateFrom && matchesDateTo;
       })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      return filtered;
   });
 
   // Unique Categories
@@ -1208,6 +1315,62 @@ export class App {
     if (period === '1Y') cutoff.setFullYear(now.getFullYear() - 1);
     
     return all.filter(t => new Date(t.date) >= cutoff);
+  });
+  
+  // NIEUW: Trend Analyse (Suggestie 6)
+  trendAnalysis = computed(() => {
+      const txs = this.statsFilteredData().filter(t => t.type === 'expense');
+      
+      const now = new Date();
+      // Bepaal de huidige maand (M0)
+      const currentMonthKey = now.toISOString().slice(0, 7);
+      
+      // Bepaal de referentieperiode (M-3 tot M-1)
+      const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
+
+      // 1. Bereken uitgaven voor huidige maand (M0)
+      const currentMonthExpenses = new Map<string, number>();
+      txs.filter(t => t.date.startsWith(currentMonthKey)).forEach(t => {
+          currentMonthExpenses.set(t.category, (currentMonthExpenses.get(t.category) || 0) + t.amount);
+      });
+      
+      // 2. Bereken gemiddelde uitgaven voor de referentieperiode (Avg M-1, M-2, M-3)
+      const referenceExpenses = new Map<string, number>();
+      const monthKeys: string[] = [];
+      for(let i = 1; i <= 3; i++) {
+          const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          monthKeys.push(d.toISOString().slice(0, 7));
+      }
+
+      txs.filter(t => monthKeys.includes(t.date.slice(0, 7))).forEach(t => {
+          referenceExpenses.set(t.category, (referenceExpenses.get(t.category) || 0) + t.amount);
+      });
+
+      const categories = Array.from(new Set([...Array.from(currentMonthExpenses.keys()), ...Array.from(referenceExpenses.keys())]));
+      
+      const results: { category: string, diff: number, pctChange: number, current: number, avg: number }[] = [];
+
+      categories.forEach(cat => {
+          const current = currentMonthExpenses.get(cat) || 0;
+          const refTotal = referenceExpenses.get(cat) || 0;
+          const avg = refTotal / 3; // Gemiddelde over 3 maanden
+          
+          if (avg > 100 || current > 100) { // Filter kleine bedragen
+              const diff = current - avg;
+              const pctChange = avg > 0 ? Math.round((diff / avg) * 100) : 100;
+              
+              if (Math.abs(pctChange) >= 20) {
+                  results.push({ category: cat, diff, pctChange, current, avg });
+              }
+          }
+      });
+      
+      results.sort((a,b) => b.diff - a.diff);
+
+      return {
+          high: results.filter(r => r.diff > 0),
+          low: results.filter(r => r.diff < 0).map(r => ({...r, diff: Math.abs(r.diff)})), // absolute diff for low
+      };
   });
 
   // Bar chart is Category based
@@ -1422,7 +1585,7 @@ export class App {
       alert(`${filteredIds.length} transacties bijgewerkt.`);
   }
 
-  // Helper: Smart Parse number (FIXED)
+  // Helper: Smart Parse number
   parseSmartNumber(amountStr: string): number {
       if (!amountStr) return 0;
       amountStr = amountStr.trim();
@@ -1536,10 +1699,11 @@ export class App {
                   type: type,
                   category: 'Onbekend',
                   accountNumber: acc,
-                  currentBalance: currentBal
+                  currentBalance: currentBal,
+                  tags: [] // Standaard leeg bij import
               };
               
-              // Apply categorization rules (1)
+              // Apply categorization rules
               newTx = this.applyRulesToImport(newTx);
               
               newTxs.push(newTx);
@@ -1552,6 +1716,41 @@ export class App {
       this.transactions.update(curr => [...curr, ...newTxs]);
       this.showCsvModal = false;
       alert(`${newTxs.length} transacties geïmporteerd. (${skipped} overgeslagen)`);
+  }
+
+  // NIEUW: CSV Export van gefilterde data (Suggestie 10)
+  exportFilteredCsv() {
+    const data = this.filteredTransactions();
+    if (data.length === 0) {
+        alert('Er zijn geen gefilterde transacties om te exporteren.');
+        return;
+    }
+
+    const headers = ["Datum", "Rekening", "Omschrijving", "Bedrag", "Type", "Categorie", "Saldo", "Tags"];
+    
+    // Convert data to CSV rows
+    const csvRows = data.map(t => [
+        t.date,
+        t.accountNumber || '',
+        `"${t.description.replace(/"/g, '""')}"`, // Handle quotes in description
+        t.type === 'expense' ? `-${t.amount.toFixed(2).replace('.', ',')}` : t.amount.toFixed(2).replace('.', ','),
+        t.type,
+        t.category,
+        t.currentBalance !== undefined ? t.currentBalance.toFixed(2).replace('.', ',') : '',
+        t.tags?.join('|') || ''
+    ].join(';')); // Use semicolon for better NL compatibility
+
+    const csvContent = headers.join(';') + '\n' + csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Transacties_Filtered_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // Basic CRUD
@@ -1577,6 +1776,18 @@ export class App {
       }
   }
 
+  // NIEUW: Handler voor Tags input om complexe logica uit template te halen
+  handleTagInput(value: string) {
+      if (typeof value !== 'string') {
+          this.currentTransaction.tags = [];
+          return;
+      }
+      // Splits op komma, verwijdert witruimte, filtert lege strings
+      this.currentTransaction.tags = value.split(',')
+          .map(t => t.trim())
+          .filter(t => t.length > 0);
+  }
+
   closeModal() { this.showModal = false; }
   
   saveTransaction() {
@@ -1590,10 +1801,20 @@ export class App {
         return;
     }
 
+    // Ensure tags array exists
+    if (!this.currentTransaction.tags) {
+        this.currentTransaction.tags = [];
+    }
+
     // Apply rules on save (only if it's a new or description changed)
     const txToSave = { ...this.currentTransaction };
     if (!this.isEditing) {
         this.currentTransaction = this.applyRulesToImport(txToSave);
+    }
+    
+    // Add new category to manual list if it doesn't exist
+    if (this.isNewCategoryMode || !this.allCategories().includes(this.currentTransaction.category)) {
+        this.addManualCategoryFromModal(this.currentTransaction.category);
     }
     
     if (this.isEditing) {
@@ -1605,6 +1826,12 @@ export class App {
     this.closeModal();
   }
   
+  addManualCategoryFromModal(name: string) {
+      const trimmedName = name.trim();
+      if (!trimmedName || this.allCategories().includes(trimmedName)) return;
+      this.manualCategories.update(cats => [...cats, trimmedName]);
+  }
+
   deleteTransaction(id: string) { 
     if (!id) {
       alert('Fout: Kan deze transactie niet verwijderen (geen ID). Probeer de data opnieuw te importeren.');
@@ -1623,7 +1850,8 @@ export class App {
           description: '', 
           amount: 0, 
           type: 'expense', 
-          category: 'Algemeen' 
+          category: 'Algemeen',
+          tags: []
       }; 
   }
   
@@ -1679,7 +1907,8 @@ export class App {
             type: isIncome ? 'income' : 'expense',
             category: cat,
             accountNumber: accNum,
-            currentBalance: 1000 + Math.floor(Math.random() * 5000)
+            currentBalance: 1000 + Math.floor(Math.random() * 5000),
+            tags: Math.random() < 0.2 ? ['zakelijk'] : []
         });
     }
     
