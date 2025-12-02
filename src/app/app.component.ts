@@ -8,7 +8,6 @@ interface ApiConfig {
     token: string; // Het ontvangen JWT token
     username: string; // Verplicht
     password?: string; // Tijdelijk veld, niet persistent opgeslagen
-    endpointName: string; // Naam van het unieke dashboard endpoint
 }
 
 // OPGELOST: ConfigBase type is nu string om conflicten met Transaction['type'] op te lossen.
@@ -71,7 +70,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
 
 // --- API Service Logic ---
 class ApiService {
-    private config: ApiConfig = { url: '', token: '', username: '', endpointName: 'finance-data' };
+    private config: ApiConfig = { url: '', token: '', username: '' };
     private apiBaseUrl = ''; 
     private transactionType = 'transaction';
     private configType = 'config';
@@ -157,9 +156,9 @@ class ApiService {
 
 
     private updateBaseUrl() {
-        if (this.config.url && this.config.endpointName) {
-            // Gebruik cleanUrl
-            this.apiBaseUrl = `${this.cleanUrl(this.config.url)}/api/${this.config.endpointName}`; 
+        if (this.config.url) {
+            // Hardcoded endpoint: /api/finance
+            this.apiBaseUrl = `${this.cleanUrl(this.config.url)}/api/finance`;
         } else {
             this.apiBaseUrl = '';
         }
@@ -172,8 +171,7 @@ class ApiService {
         const configToStore = {
             url: newConfig.url,
             token: newConfig.token,
-            username: newConfig.username,
-            endpointName: newConfig.endpointName
+            username: newConfig.username
         };
         localStorage.setItem('apiConfig', JSON.stringify(configToStore));
     }
@@ -294,7 +292,7 @@ class ApiService {
               </div>
               <span class="font-bold text-xl tracking-tight hidden sm:block">MijnFinanciën</span>
               <span *ngIf="apiConfig().url" class="text-xs text-gray-500 ml-4 hidden sm:block">
-                 API: {{ apiConfig().endpointName }} op {{ apiConfig().url | slice:7:30 }}... | Gebruiker: {{ apiConfig().username }}
+                 API: api/finance op {{ apiConfig().url | slice:7:30 }}... | Gebruiker: {{ apiConfig().username }}
               </span>
             </div>
             
@@ -1333,7 +1331,7 @@ export class App {
   
   loadApiConfig(): ApiConfig {
       // GEWIJZIGD: username is nu verplicht in de API Config interface
-      const defaultConfig: ApiConfig = { url: '', token: '', username: '', endpointName: 'finance', password: '' };
+      const defaultConfig: ApiConfig = { url: '', token: '', username: '', password: '' };
       try {
           const configStr = localStorage.getItem('apiConfig');
           if (configStr) {
