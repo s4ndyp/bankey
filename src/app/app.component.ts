@@ -3,8 +3,14 @@ import { CommonModule, DatePipe, CurrencyPipe, DecimalPipe } from '@angular/comm
 import { FormsModule } from '@angular/forms';
 
 // --- Interfaces ---
+interface ApiConfig {
+    url: string; // Bijv. 'http://andere-server:8080'
+    token: string;
+    username?: string; // Optioneel, alleen voor weergave
+}
+
 interface Transaction {
-  id: string;
+  id: string; // MongoDB ObjectId
   date: string; // ISO format YYYY-MM-DD
   description: string;
   amount: number;
@@ -26,6 +32,7 @@ interface CsvMapping {
 
 interface CsvMappingTemplate extends CsvMapping {
   name: string;
+  type: 'mapping_template'; // Marker voor de API
 }
 
 interface CategorizationRule {
@@ -33,9 +40,131 @@ interface CategorizationRule {
     keyword: string; // Trefwoord in omschrijving
     category: string; // Nieuwe categorie
     newDescription?: string; // Nieuwe omschrijving
+    type: 'rule'; // Marker voor de API
+}
+
+interface AccountNameRecord {
+    id: string; // vast ID voor dit record
+    names: Record<string, string>;
+    type: 'account_names'; // Marker voor de API
+}
+
+interface ManualCategoryRecord {
+    id: string; // vast ID
+    categories: string[];
+    type: 'manual_categories'; // Marker voor de API
 }
 
 type Period = '1M' | '6M' | '1Y' | 'ALL';
+
+// --- API Service Logic ---
+class ApiService {
+    private config: ApiConfig = { url: '', token: '', username: '' };
+    private apiUrl = '';
+
+    constructor(initialConfig: ApiConfig) {
+        this.config = initialConfig;
+        this.apiUrl = `${this.config.url}/api/items`;
+    }
+
+    public updateConfig(newConfig: ApiConfig) {
+        this.config = newConfig;
+        this.apiUrl = `${this.config.url}/api/items`;
+        // Opslaan in localStorage voor persistentie tussen sessies
+        localStorage.setItem('apiConfig', JSON.stringify(newConfig));
+    }
+    
+    public getConfig(): ApiConfig {
+        return this.config;
+    }
+
+    private async callApi(url: string, method: string, data: any = null): Promise<any> {
+        if (!this.config.url || !this.config.token) {
+            throw new Error('API URL of Token is niet ingesteld.');
+        }
+
+        const headers = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.config.token}`,
+            'Access-Control-Allow-Origin': '*' // Nodig voor CORS
+        };
+
+        const options: RequestInit = {
+            method: method,
+            headers: headers,
+            body: data ? JSON.stringify(data) : null,
+            mode: 'cors'
+        };
+
+        const response = await fetch(url, options);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`API Fout (${response.status}): ${errorText.substring(0, 150)}`);
+        }
+        
+        // DELETE (204) heeft geen body
+        if (method === 'DELETE') return { status: 'deleted' };
+
+        return response.json();
+    }
+    
+    // --- Algemene CRUD Functies ---
+
+    // Haalt alle items op, optioneel filteren op type
+    async getItems<T>(filterType?: string): Promise<T[]> {
+        let url = this.apiUrl;
+        let queryParams = '';
+        if (filterType) {
+             queryParams += `type=${filterType}`;
+        }
+        if (queryParams) {
+            url += `?${queryParams}`;
+        }
+        
+        // De API retourneert een array van objecten: {id: 'mongo_id', data: {...document...}}
+        const result: { id: string, data: T }[] = await this.callApi(url, 'GET');
+        
+        // We mappen het resultaat naar de gewenste structuur (waarbij 'id' al in 'data' zit)
+        return result.map(item => ({...item.data, id: item.id}));
+    }
+
+    // Voegt een nieuw item toe
+    async addItem<T>(item: T): Promise<T> {
+        // Zorg ervoor dat de 'id' property van de Angular app weg is
+        const dataToSend = { ...item };
+        if ((dataToSend as any).id) delete (dataToSend as any).id;
+        
+        const result: { id: string, data: T } = await this.callApi(this.apiUrl, 'POST', dataToSend);
+        return { ...result.data, id: result.id };
+    }
+
+    // Werkt een bestaand item bij
+    async updateItem<T extends { id: string }>(item: T): Promise<T> {
+        const id = item.id;
+        const url = `${this.apiUrl}/${id}`;
+        
+        // Stuur het volledige object (zonder de 'id' in de body)
+        const dataToSend = { ...item };
+        delete (dataToSend as any).id; 
+        
+        const result: { id: string, data: T } = await this.callApi(url, 'PUT', dataToSend);
+        return { ...result.data, id: result.id };
+    }
+    
+    // Verwijdert een item
+    async deleteItem(id: string): Promise<void> {
+        const url = `${this.apiUrl}/${id}`;
+        await this.callApi(url, 'DELETE');
+    }
+    
+    // Verwijdert meerdere items op basis van een filter (bijv. type='transaction')
+    async deleteBulk(key: string, value: string): Promise<void> {
+        const url = `${this.apiUrl}?${key}=${value}`;
+        await this.callApi(url, 'DELETE');
+    }
+}
+// Einde ApiService
 
 @Component({
   selector: 'app-root',
@@ -56,6 +185,9 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 </svg>
               </div>
               <span class="font-bold text-xl tracking-tight hidden sm:block">MijnFinanciën</span>
+              <span *ngIf="apiConfig().url" class="text-xs text-gray-500 ml-4 hidden sm:block">
+                 API: {{ apiConfig().url | slice:0:30 }}... | Gebruiker: {{ apiConfig().username }}
+              </span>
             </div>
             
             <div class="flex space-x-1 sm:space-x-2">
@@ -72,6 +204,25 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
 
       <!-- Main Content -->
       <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24">
+        
+        <!-- === API CONNECTION SETUP VIEW === -->
+        <div *ngIf="!apiConfig().token && activeTab() !== 'settings'" class="p-8 bg-yellow-900/50 border border-yellow-700 rounded-xl shadow-xl text-center mb-8">
+            <h3 class="text-2xl font-bold text-yellow-300 mb-2">API Verbinding Vereist</h3>
+            <p class="text-yellow-400 mb-4">Om de applicatie te gebruiken, moet je eerst de URL, gebruikersnaam en JWT-token van de API Gateway instellen op het tabblad "Beheer".</p>
+            <button (click)="activeTab.set('settings')" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-medium transition-colors">
+              Ga naar Instellingen
+            </button>
+        </div>
+        
+        <!-- Toon laadstatus overal behalve Settings -->
+        <div *ngIf="isLoading() && activeTab() !== 'settings'" class="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/80 backdrop-blur-sm">
+            <div class="flex flex-col items-center p-6 bg-gray-800 rounded-xl shadow-2xl border border-gray-700">
+                <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
+                <p class="text-lg font-semibold text-white">Laden...</p>
+                <p class="text-sm text-gray-500 mt-1">{{ loadingMessage() }}</p>
+            </div>
+        </div>
+
         
         <!-- === DASHBOARD VIEW === -->
         <div *ngIf="activeTab() === 'dashboard'" class="animate-fade-in space-y-8">
@@ -174,7 +325,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
             <h2 class="text-xl font-bold mb-2 sm:mb-0">Statistieken</h2>
             <div class="flex bg-gray-900 p-1 rounded-lg">
               <button *ngFor="let p of periods" 
-                (click)="statsPeriod.set(p)"
+                (click)="statsPeriod.set(p); reloadData()"
                 [class]="statsPeriod() === p ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'"
                 class="px-3 py-1.5 text-sm font-medium rounded-md transition-all">
                 {{ p }}
@@ -356,7 +507,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                             <option *ngFor="let cat of allCategories()" [value]="cat">{{ cat }}</option>
                         </select>
 
-                        <button (click)="addRule()" class="col-span-1 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg transition-colors flex-shrink-0">Regel Toevoegen</button>
+                        <button (click)="addRule()" class="col-span-1 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg transition-colors flex-shrink-0" [disabled]="!apiConfig().token">Regel Toevoegen</button>
                     </div>
 
                     <input type="text" [(ngModel)]="newRule.newDescription" placeholder="Optioneel: Nieuwe omschrijving (laat leeg om te behouden)" class="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none" />
@@ -379,10 +530,10 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                         </div>
                         
                         <div class="flex gap-2 flex-shrink-0">
-                            <button (click)="applyRuleToExisting(rule)" class="text-blue-400 hover:text-blue-300 p-1 rounded transition-colors text-xs font-medium border border-blue-600/50 hover:bg-blue-900/50 px-2 py-1">
+                            <button (click)="applyRuleToExisting(rule)" class="text-blue-400 hover:text-blue-300 p-1 rounded transition-colors text-xs font-medium border border-blue-600/50 hover:bg-blue-900/50 px-2 py-1" [disabled]="!apiConfig().token">
                                 Pas toe op bestaande
                             </button>
-                            <button (click)="deleteRule(rule.id)" class="text-red-400 hover:text-red-300 p-1 rounded transition-colors" title="Verwijder regel">
+                            <button (click)="deleteRule(rule.id)" class="text-red-400 hover:text-red-300 p-1 rounded transition-colors" title="Verwijder regel" [disabled]="!apiConfig().token">
                                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                             </button>
                         </div>
@@ -406,19 +557,24 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                         <!-- New Category Input -->
                         <div class="flex gap-2">
                             <input type="text" [(ngModel)]="newCategoryName" placeholder="Nieuwe categorie naam" class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1 text-white text-sm focus:ring-blue-500">
-                            <button (click)="addManualCategory()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-sm transition-colors flex-shrink-0">Voeg toe</button>
+                            <button (click)="addManualCategory()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-sm transition-colors flex-shrink-0" [disabled]="!apiConfig().token">Voeg toe</button>
                         </div>
 
                         <!-- List -->
                         <div class="space-y-1 max-h-40 overflow-y-auto custom-scrollbar pt-2">
-                            <div *ngFor="let cat of allCategories()" class="flex justify-between items-center text-sm p-1 hover:bg-gray-700/50 rounded">
+                            <div *ngFor="let cat of manualCategories()" class="flex justify-between items-center text-sm p-1 hover:bg-gray-700/50 rounded">
                                 <div class="flex items-center gap-2">
                                     <span class="w-3 h-3 rounded-full flex-shrink-0" [style.background-color]="getCategoryColor(cat)"></span>
                                     <span class="text-gray-300 truncate">{{ cat }}</span>
                                 </div>
-                                <button (click)="renameCategory(cat)" class="text-blue-400 hover:text-blue-300 p-1" title="Hernoem">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.536L15.232 5.232z"></path></svg>
-                                </button>
+                                <div class="flex gap-1">
+                                    <button (click)="renameCategory(cat)" class="text-blue-400 hover:text-blue-300 p-1" title="Hernoem" [disabled]="!apiConfig().token">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.536L15.232 5.232z"></path></svg>
+                                    </button>
+                                    <button (click)="deleteManualCategory(cat)" class="text-red-400 hover:text-red-300 p-1" title="Verwijder" [disabled]="!apiConfig().token">
+                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -433,8 +589,10 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                                   [ngModel]="getAccountName(acc)"
                                   (ngModelChange)="setAccountName(acc, $event)"
                                   placeholder="Naam (bv. Betaalrekening)"
-                                  class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1 text-white text-sm focus:ring-blue-500">
+                                  class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1 text-white text-sm focus:ring-blue-500"
+                                  [disabled]="!apiConfig().token">
                         </div>
+                        <button (click)="saveAccountNames()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-sm transition-colors flex-shrink-0" [disabled]="!apiConfig().token">Namen Opslaan</button>
                     </div>
                 </div>
             </div>
@@ -446,7 +604,8 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     Deze actie kan niet ongedaan worden gemaakt.
                 </p>
                 <button (click)="deleteAllTransactions()" 
-                        class="bg-red-700 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2">
+                        class="bg-red-700 hover:bg-red-600 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+                        [disabled]="!apiConfig().token">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                     Alle Transacties Wissen
                 </button>
@@ -465,14 +624,16 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                   Export ({{filteredTransactions().length}})
               </button>
               <button *ngIf="filteredTransactions().length > 0" (click)="openBulkEdit()" 
-                 class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded-lg flex items-center gap-2 transition-all border border-gray-600">
+                 class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-4 py-2 rounded-lg flex items-center gap-2 transition-all border border-gray-600"
+                 [disabled]="!apiConfig().token">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                   <path d="M17.414 2.586a2 2 0 00-2.828 0L7 9.414V13h3.586l6.828-6.828a2 2 0 000-2.828z" />
                   <path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" />
                 </svg>
                 Bulk Bewerk
               </button>
-              <button (click)="openModal()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20">
+              <button (click)="openModal()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow-lg shadow-blue-900/20"
+                      [disabled]="!apiConfig().token">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                   <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
                 </svg>
@@ -568,10 +729,12 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     </td>
                     <td class="p-3 text-right">
                       <div class="flex justify-end gap-2 opacity-100 transition-opacity whitespace-nowrap">
-                         <button (click)="$event.stopPropagation(); openModal(t)" class="p-1 hover:bg-blue-900/50 rounded text-blue-400 cursor-pointer" title="Bewerken">
+                         <button (click)="$event.stopPropagation(); openModal(t)" class="p-1 hover:bg-blue-900/50 rounded text-blue-400 cursor-pointer" title="Bewerken"
+                                 [disabled]="!apiConfig().token">
                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                          </button>
-                         <button (click)="$event.stopPropagation(); deleteTransaction(t.id)" class="p-1 hover:bg-red-900/50 rounded text-red-400 cursor-pointer" title="Verwijderen">
+                         <button (click)="$event.stopPropagation(); deleteTransaction(t.id)" class="p-1 hover:bg-red-900/50 rounded text-red-400 cursor-pointer" title="Verwijderen"
+                                 [disabled]="!apiConfig().token">
                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                          </button>
                       </div>
@@ -594,6 +757,35 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
         <!-- === SETTINGS / IMPORT / EXPORT VIEW === -->
         <div *ngIf="activeTab() === 'settings'" class="animate-fade-in max-w-2xl mx-auto space-y-6">
           <h2 class="text-2xl font-bold mb-6">Data Beheer</h2>
+          
+          <!-- API Configuration Card (NIEUW) -->
+          <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg space-y-4">
+            <h3 class="text-lg font-semibold text-white flex items-center gap-2">
+               <svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2v4a2 2 0 01-2 2h-2m-3 4h.01M3 12L3 4m0 0l4 4m-4-4l4-4M19 18v-4m0 0v-4m0 4h-4m4 0h4m-4 0v4m0-4v-4m-4 0h-4"></path></svg>
+               API Gateway Instellingen
+            </h3>
+            
+            <div class="space-y-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">API URL (Inclusief poort 8080)</label>
+                <input type="url" [(ngModel)]="newApiConfig.url" placeholder="http://mijn-server-ip:8080" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Gebruikersnaam (voor weergave)</label>
+                <input type="text" [(ngModel)]="newApiConfig.username" placeholder="Gebruikersnaam" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">JWT Token (Bearer)</label>
+                <textarea [(ngModel)]="newApiConfig.token" placeholder="Plak hier het lange JWT-token..." rows="3" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm resize-none"></textarea>
+              </div>
+            </div>
+            <button (click)="saveApiConfig()" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-medium transition-colors w-full">
+              Opslaan & Data Synchroniseren
+            </button>
+            <div *ngIf="apiConfig().token" class="text-sm text-green-400 mt-2 text-center">
+                Verbonden: Transacties worden nu opgeslagen via de API.
+            </div>
+          </div>
           
           <!-- CSV Import Card -->
           <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg relative overflow-hidden">
@@ -622,13 +814,13 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
           <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg relative overflow-hidden">
              <div class="flex flex-col sm:flex-row gap-4">
                 <div class="flex-1">
-                  <h3 class="text-lg font-semibold mb-2 text-white">Backup Maken</h3>
+                  <h3 class="text-lg font-semibold mb-2 text-white">Backup Maken (Lokaal)</h3>
                   <p class="text-xs text-gray-400 mb-4">Download al je data als JSON bestand.</p>
                   <button (click)="exportData()" class="text-sm bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded-lg border border-gray-600 w-full transition-colors">Download</button>
                 </div>
                 <div class="w-px bg-gray-700 hidden sm:block"></div>
                 <div class="flex-1">
-                   <h3 class="text-lg font-semibold mb-2 text-white">Backup Herstellen</h3>
+                   <h3 class="text-lg font-semibold mb-2 text-white">Backup Herstellen (Lokaal)</h3>
                    <p class="text-xs text-gray-400 mb-4">Overschrijft huidige data!</p>
                    <input type="file" (change)="importJson($event)" class="block w-full text-xs text-gray-400 file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-gray-700 file:text-white hover:file:bg-gray-600 cursor-pointer"/>
                 </div>
@@ -636,8 +828,8 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
           </div>
           
           <div class="mt-8 text-center">
-            <button (click)="loadDummyData()" class="text-sm text-gray-500 hover:text-blue-400 underline">
-              Reset & Laad voorbeeld data
+            <button (click)="loadDummyData()" class="text-sm text-gray-500 hover:text-blue-400 underline" [disabled]="!apiConfig().token">
+              Reset & Laad voorbeeld data (API)
             </button>
           </div>
         </div>
@@ -778,7 +970,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                         <!-- Save Template -->
                         <div class="flex gap-2">
                            <input type="text" [(ngModel)]="newTemplateName" placeholder="Naam voor nieuwe template" class="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm">
-                           <button (click)="saveMappingTemplate()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg text-sm transition-colors flex-shrink-0" title="Template opslaan">
+                           <button (click)="saveMappingTemplate()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg text-sm transition-colors flex-shrink-0" title="Template opslaan" [disabled]="!apiConfig().token">
                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-3m-1-4l-8.4-8.4-5 5 8.4 8.4 5-5zM9 8h.01"></path></svg>
                            </button>
                         </div>
@@ -841,7 +1033,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
              </div>
 
              <div class="px-6 py-4 bg-gray-900/50 flex flex-col sm:flex-row justify-end gap-3 border-t border-gray-700">
-                <button (click)="processCsvImport()" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-medium transition-colors">
+                <button (click)="processCsvImport()" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-medium transition-colors" [disabled]="!apiConfig().token">
                    Importeren
                 </button>
                 <button (click)="showCsvModal = false" class="text-gray-400 hover:text-white px-4 py-2 font-medium">Annuleren</button>
@@ -925,6 +1117,15 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
   `]
 })
 export class App {
+  // --- SERVICE & CONFIGURATION ---
+  private apiService: ApiService;
+  
+  // States voor de API Configuratie
+  apiConfig = signal<ApiConfig>(this.loadApiConfig());
+  newApiConfig: ApiConfig = this.loadApiConfig(); // Temp state voor de form
+  isLoading = signal(false);
+  loadingMessage = signal('Initialiseren...');
+
   // Navigation
   tabs = [
     { id: 'dashboard', label: 'Overzicht' },
@@ -981,78 +1182,194 @@ export class App {
   bulkEditDescription = '';
   
   // Rules Tab State
-  newRule: CategorizationRule = { id: this.generateUUID(), keyword: '', category: '', newDescription: '' };
+  newRule: CategorizationRule = { id: this.generateUUID(), keyword: '', category: '', type: 'rule', newDescription: '' };
 
   // Category Management State
   newCategoryName = ''; // Voor handmatig toevoegen op Regels pagina
   
   constructor() {
-    this.loadFromStorage();
-    this.loadMappingTemplates();
-    this.loadRules(); 
-    this.loadAccountNames(); 
-    this.loadManualCategories(); // NIEUW: Laad handmatige categorieën
+    this.apiService = new ApiService(this.apiConfig());
+    this.loadAllData();
     
-    // Save data on change
-    effect(() => {
-      try { localStorage.setItem('financeData', JSON.stringify(this.transactions())); } catch (e) {}
-    });
-    // Save templates on change
-    effect(() => {
-        try { localStorage.setItem('financeMappingTemplates', JSON.stringify(this.mappingTemplates())); } catch (e) {}
-    });
-    // Save rules on change
-    effect(() => {
-        try { localStorage.setItem('financeRules', JSON.stringify(this.categorizationRules())); } catch (e) {}
-    });
-    // Save account names on change
-    effect(() => {
-        try { localStorage.setItem('financeAccountNames', JSON.stringify(this.accountNames())); } catch (e) {}
-    });
-    // Save manual categories on change (NIEUW)
-    effect(() => {
-        try { localStorage.setItem('financeManualCategories', JSON.stringify(this.manualCategories())); } catch (e) {}
-    });
+    // De oude localStorage effects worden verwijderd omdat we de API gebruiken
+    // Een effect om de configuratie te updaten is niet meer nodig, dit gebeurt nu in updateConfig/saveApiConfig
+  }
+  
+  // --- DATA LOADING & API WRAPPERS ---
+  
+  loadApiConfig(): ApiConfig {
+      try {
+          const configStr = localStorage.getItem('apiConfig');
+          if (configStr) {
+              const config = JSON.parse(configStr);
+              // Zorg dat de URL in de form wordt geladen
+              return { url: config.url || '', token: config.token || '', username: config.username || 'Onbekend' };
+          }
+      } catch (e) {
+          console.error('Fout bij laden API config:', e);
+      }
+      return { url: '', token: '', username: 'Onbekend' };
+  }
+  
+  async saveApiConfig() {
+    if (!this.newApiConfig.url || !this.newApiConfig.token) {
+        alert("Vul de API URL en JWT Token in.");
+        return;
+    }
+    this.apiService.updateConfig(this.newApiConfig);
+    this.apiConfig.set(this.newApiConfig);
+    await this.loadAllData(true); // Probeer direct te laden
+    alert("API configuratie opgeslagen en synchronisatie gestart.");
   }
 
+  async loadAllData(forceReload = false) {
+      if (!this.apiConfig().token) return;
+      
+      this.isLoading.set(true);
+      this.loadingMessage.set('Transacties en configuratie ophalen...');
+      
+      try {
+        // 1. Transacties (type='transaction')
+        const txs = await this.apiService.getItems<Transaction>('transaction');
+        this.transactions.set(txs);
+
+        // 2. Rules (type='rule')
+        const rules = await this.apiService.getItems<CategorizationRule>('rule');
+        this.categorizationRules.set(rules);
+
+        // 3. Templates (type='mapping_template')
+        const templates = await this.apiService.getItems<CsvMappingTemplate>('mapping_template');
+        this.mappingTemplates.set(templates);
+        
+        // 4. Account Names (type='account_names')
+        const accountRecord = await this.apiService.getItems<AccountNameRecord>('account_names');
+        this.accountNames.set(accountRecord[0]?.names || {});
+        
+        // 5. Manual Categories (type='manual_categories')
+        const manualCatRecord = await this.apiService.getItems<ManualCategoryRecord>('manual_categories');
+        this.manualCategories.set(manualCatRecord[0]?.categories || []);
+
+      } catch (e) {
+        console.error('Fout bij het laden van data:', e);
+        alert(`Fout bij het synchroniseren met de API: ${e.message}. Controleer uw URL en Token.`);
+        this.apiConfig.update(c => ({...c, token: ''})); // Logisch uitloggen als API faalt
+      } finally {
+        this.isLoading.set(false);
+      }
+  }
+  
+  async saveItem<T extends { type: string, id: string }>(item: T): Promise<T> {
+      if (!this.apiConfig().token) throw new Error("API not configured");
+      
+      this.isLoading.set(true);
+      this.loadingMessage.set(`Bezig met opslaan van ${item.type}...`);
+      
+      try {
+          if (item.id && item.id !== '') {
+             return await this.apiService.updateItem(item);
+          } else {
+             const newItem = await this.apiService.addItem(item);
+             // De API voegt de MongoDB ID toe. Dit is nu het canonical ID.
+             return newItem;
+          }
+      } catch (e) {
+          console.error('Fout bij opslaan item:', e);
+          alert(`Fout bij opslaan van ${item.type}: ${e.message}`);
+          throw e; // gooi de fout door
+      } finally {
+          this.isLoading.set(false);
+      }
+  }
+  
   // --- ACCOUNT & CATEGORY MANAGEMENT ---
   
   // Accounts
-  loadAccountNames() {
-      try { const names = localStorage.getItem('financeAccountNames'); if (names) this.accountNames.set(JSON.parse(names)); } catch (e) {}
-  }
   getAccountName(accNum?: string): string {
       if (!accNum) return '-';
       return this.accountNames()[accNum] || accNum;
   }
+  
   setAccountName(accNum: string, name: string) {
       this.accountNames.update(names => {
           names[accNum] = name;
           return { ...names };
       });
   }
+  
   uniqueAccountNumbers = computed(() => {
       const accs = new Set(this.transactions().map(t => t.accountNumber).filter(a => a));
       return Array.from(accs).sort();
   });
   
-  // Categories
-  loadManualCategories() {
-      try { const cats = localStorage.getItem('financeManualCategories'); if (cats) this.manualCategories.set(JSON.parse(cats)); } catch (e) {}
+  // Sla het AccountNames object op in de API
+  async saveAccountNames() {
+      const currentNames = this.accountNames();
+      const existingRecord = this.categorizationRules().find(r => r.type === 'account_names') as AccountNameRecord | undefined;
+      
+      const record: AccountNameRecord = {
+          id: existingRecord?.id || 'account_names_singleton', // Gebruik een vast ID voor dit singleton record
+          names: currentNames,
+          type: 'account_names'
+      };
+      
+      try {
+          const savedRecord = await this.saveItem(record);
+          // Omdat dit een singleton is, hoeven we de accountNames signal niet bij te werken (het is al de lokale bron van waarheid)
+          alert("Rekeningnamen succesvol opgeslagen.");
+      } catch (e) {
+          // Foutmelding wordt al in saveItem gegeven
+      }
   }
-
+  
+  // Categories
   // Nieuwe categorie handmatig toevoegen
-  addManualCategory() {
+  async addManualCategory() {
     const name = this.newCategoryName.trim();
     if (!name) return;
     if (this.allCategories().includes(name)) {
         alert(`Categorie "${name}" bestaat al.`);
         return;
     }
-    this.manualCategories.update(cats => [...cats, name]);
-    this.newCategoryName = '';
-    alert(`Categorie "${name}" toegevoegd.`);
+    
+    try {
+        this.manualCategories.update(cats => [...cats, name]);
+        await this.saveManualCategories();
+        this.newCategoryName = '';
+        alert(`Categorie "${name}" toegevoegd.`);
+    } catch(e) {
+        this.manualCategories.update(cats => cats.filter(c => c !== name)); // Rollback
+    }
   }
+  
+  // Verwijder handmatige categorie
+  async deleteManualCategory(catToDelete: string) {
+      if (!confirm(`Weet je zeker dat je de handmatige categorie "${catToDelete}" wilt verwijderen? Dit beïnvloedt GEEN bestaande transacties.`)) return;
+      
+      const oldCats = this.manualCategories();
+      const newCats = oldCats.filter(c => c !== catToDelete);
+      
+      try {
+          this.manualCategories.set(newCats);
+          await this.saveManualCategories();
+          alert(`Categorie "${catToDelete}" verwijderd.`);
+      } catch(e) {
+          this.manualCategories.set(oldCats); // Rollback
+      }
+  }
+  
+  // Sla de handmatige categorielijst op in de API
+  async saveManualCategories() {
+       const existingRecord = this.categorizationRules().find(r => r.type === 'manual_categories') as ManualCategoryRecord | undefined;
+      
+       const record: ManualCategoryRecord = {
+           id: existingRecord?.id || 'manual_categories_singleton',
+           categories: this.manualCategories(),
+           type: 'manual_categories'
+       };
+       
+       return this.saveItem(record); // Retourneert Promise
+  }
+
 
   // Combineert gebruikte categorieën en handmatige categorieën
   allCategories = computed(() => {
@@ -1061,83 +1378,163 @@ export class App {
       return Array.from(usedCats).sort();
   });
   
-  renameCategory(oldCat: string) {
+  // Hernoem categorie (werkt lokaal en werkt rules/transacties/manualCats bij)
+  async renameCategory(oldCat: string) {
       const newCat = prompt(`Hernoem categorie "${oldCat}" naar:`);
       if (!newCat || newCat === oldCat) return;
-
-      this.transactions.update(items => items.map(t => ({
+      
+      // 1. Update Transacties
+      const updatedTxs: Transaction[] = this.transactions().map(t => ({
           ...t,
           category: t.category === oldCat ? newCat : t.category
-      })));
-      
-      // Update rules
-      this.categorizationRules.update(rules => rules.map(r => ({
-          ...r,
-          category: r.category === oldCat ? newCat : r.category 
-      })));
+      }));
+      this.transactions.set(updatedTxs);
 
-      // Update manual list
-      this.manualCategories.update(cats => cats.map(cat => cat === oldCat ? newCat : cat).filter(c => c !== oldCat));
+      // 2. Update Rules
+      const updatedRules: CategorizationRule[] = this.categorizationRules().map(r => ({
+          ...r,
+          category: r.category === oldCat ? newCat : r.category
+      }));
+      this.categorizationRules.set(updatedRules);
+      
+      // 3. Update Manual Categories
+      const updatedManualCats: string[] = this.manualCategories().map(cat => cat === oldCat ? newCat : cat).filter(c => c !== oldCat);
+      this.manualCategories.set(updatedManualCats);
+
+
+      // 4. API Call: Update de gewijzigde rules, manual categories en transacties
+      try {
+          // Transacties updaten is te intensief in bulk. We laten dit lokaal, de 'id' blijft hetzelfde
+          
+          // Update Rules in API
+          await Promise.all(updatedRules
+              .filter(r => r.category === newCat) // Alleen degene die gewijzigd zijn
+              .map(r => this.saveItem(r)));
+              
+          // Update Manual Categories
+          await this.saveManualCategories();
+
+          alert(`Categorie "${oldCat}" is hernoemd naar "${newCat}". Regels en handmatige lijst zijn bijgewerkt. Opmerking: de Transacties in de database worden bij de volgende save/delete bijgewerkt.`);
+          
+      } catch (e) {
+          // In geval van fout: vraag de data opnieuw op
+          this.loadAllData();
+          alert(`Fout bij opslaan op API. Rollback uitgevoerd: ${e.message}`);
+      }
   }
   
   // NIEUW: Knop om alle transacties te wissen
-  deleteAllTransactions() {
-      if (confirm("WEES VOORZICHTIG! Weet je zeker dat je ALLE transacties permanent wilt verwijderen? Dit kan niet ongedaan gemaakt worden.")) {
+  async deleteAllTransactions() {
+      if (!confirm("WEES VOORZICHTIG! Weet je zeker dat je ALLE transacties permanent wilt verwijderen? Dit kan niet ongedaan gemaakt worden.")) {
+          return;
+      }
+      
+      this.isLoading.set(true);
+      this.loadingMessage.set('Alle transacties permanent verwijderen...');
+      
+      try {
+          // De API Gateway ondersteunt bulk delete via query params (type=transaction)
+          await this.apiService.deleteBulk('type', 'transaction');
           this.transactions.set([]);
-          alert("Alle transacties zijn gewist.");
+          alert("Alle transacties zijn gewist uit de API.");
+      } catch (e) {
+          console.error('Fout bij bulk delete:', e);
+          alert(`Fout bij wissen transacties: ${e.message}`);
+          this.loadAllData(); // Probeer opnieuw te synchroniseren
+      } finally {
+          this.isLoading.set(false);
       }
   }
 
 
   // --- AUTOMATIC CATEGORIZATION RULES ---
   
-  loadRules() {
-      try { const rules = localStorage.getItem('financeRules'); if (rules) this.categorizationRules.set(JSON.parse(rules)); } catch (e) {}
-  }
+  // Load Rules is nu onderdeel van loadAllData
   
-  addRule() {
+  async addRule() {
       if (!this.newRule.keyword || !this.newRule.category) {
           alert('Trefwoord en Categorie zijn verplicht.');
           return;
       }
       const ruleToAdd: CategorizationRule = { 
-          id: this.generateUUID(), 
+          id: this.generateUUID(), // Eerst een lokaal ID
           keyword: this.newRule.keyword.toLowerCase().trim(), 
           category: this.newRule.category,
+          type: 'rule', // Voeg het API type toe
           newDescription: this.newRule.newDescription?.trim() || undefined // Sla alleen op als ingevuld
       };
       
+      const oldRules = this.categorizationRules();
       this.categorizationRules.update(rules => [...rules, ruleToAdd]);
-      this.newRule.keyword = '';
-      this.newRule.category = '';
-      this.newRule.newDescription = '';
+
+      try {
+          const savedRule = await this.saveItem(ruleToAdd);
+          this.categorizationRules.update(rules => rules.map(r => r.id === ruleToAdd.id ? savedRule : r));
+          
+          this.newRule.keyword = '';
+          this.newRule.category = '';
+          this.newRule.newDescription = '';
+          this.newRule.id = this.generateUUID(); // Nieuwe ID voor nieuwe regel
+          
+      } catch (e) {
+          this.categorizationRules.set(oldRules); // Rollback
+      }
   }
   
-  deleteRule(id: string) {
+  async deleteRule(id: string) {
+      const oldRules = this.categorizationRules();
+      const ruleToDelete = oldRules.find(r => r.id === id);
+      if (!ruleToDelete) return;
+      
       this.categorizationRules.update(rules => rules.filter(r => r.id !== id));
+      
+      try {
+          await this.apiService.deleteItem(id);
+      } catch (e) {
+          this.categorizationRules.set(oldRules); // Rollback
+      }
   }
   
   // Pas een regel toe op alle bestaande, matchende transacties
-  applyRuleToExisting(rule: CategorizationRule) {
+  async applyRuleToExisting(rule: CategorizationRule) {
       const keyword = rule.keyword.toLowerCase();
       let count = 0;
       
-      this.transactions.update(current => 
-          current.map(t => {
-              if (t.description.toLowerCase().includes(keyword)) {
-                  count++;
-                  return { 
-                      ...t,
-                      category: rule.category,
-                      description: rule.newDescription || t.description
-                  };
-              }
-              return t;
-          })
-      );
-      alert(`Regel toegepast: ${count} bestaande transacties bijgewerkt.`);
-  }
+      const transactionsToUpdate: Transaction[] = [];
+      const updatedTxs: Transaction[] = this.transactions().map(t => {
+          if (t.description.toLowerCase().includes(keyword)) {
+              count++;
+              const updated = { 
+                  ...t,
+                  category: rule.category,
+                  description: rule.newDescription || t.description
+              };
+              transactionsToUpdate.push(updated);
+              return updated;
+          }
+          return t;
+      });
+      
+      this.transactions.set(updatedTxs);
+      
+      // Bulk update is niet ingebouwd in de service/API, dus we updaten ze individueel (met lokaal een loading state)
+      this.isLoading.set(true);
+      this.loadingMessage.set(`Regel toepassen op ${count} transacties...`);
 
+      try {
+          await Promise.all(transactionsToUpdate.map(t => 
+              // We gebruiken de normale saveTransaction logica, maar zonder de ID update (want die is al correct)
+              this.apiService.updateItem({ ...t, type: 'transaction' }) 
+          ));
+          alert(`Regel succesvol toegepast: ${count} bestaande transacties bijgewerkt.`);
+      } catch (e) {
+          alert(`Fout bij bijwerken transacties op API. Synchroniseer opnieuw: ${e.message}`);
+          this.loadAllData(); // Forceer een herlading
+      } finally {
+          this.isLoading.set(false);
+      }
+  }
+  
   // Apply rules when typing in the modal
   applyRulesToNewDescription(description: string) {
       const rules = this.categorizationRules();
@@ -1175,16 +1572,7 @@ export class App {
   
   // --- TEMPLATE LOGIC ---
 
-  loadMappingTemplates() {
-    try {
-      const templates = localStorage.getItem('financeMappingTemplates');
-      if (templates) {
-        this.mappingTemplates.set(JSON.parse(templates));
-      }
-    } catch (e) {
-      console.error('Fout bij laden templates:', e);
-    }
-  }
+  // Load Templates is nu onderdeel van loadAllData
 
   loadMappingTemplate(name: string) {
     if (!name) return;
@@ -1203,18 +1591,28 @@ export class App {
     }
   }
 
-  saveMappingTemplate() {
+  async saveMappingTemplate() {
     const name = this.newTemplateName.trim();
     if (!name) {
       alert("Geef de template een naam.");
       return;
     }
 
+    const isNew = !this.mappingTemplates().some(t => t.name === name);
+    
+    // Zoek het eventuele bestaande ID of maak een nieuwe
+    const existingTemplate = this.mappingTemplates().find(t => t.name === name);
+    const id = existingTemplate?.id || this.generateUUID();
+
     const newTemplate: CsvMappingTemplate = {
+      id: id,
       name: name,
+      type: 'mapping_template',
       ...this.csvMapping
     };
 
+    const oldTemplates = this.mappingTemplates();
+    
     this.mappingTemplates.update(templates => {
       const index = templates.findIndex(t => t.name === name);
       if (index !== -1) {
@@ -1225,9 +1623,18 @@ export class App {
       return [...templates];
     });
 
-    this.selectedTemplateName = name;
-    this.newTemplateName = '';
-    alert(`Template "${name}" is opgeslagen.`);
+    try {
+        const savedTemplate = await this.saveItem(newTemplate);
+        
+        // Zorg dat het ID van de savedTemplate (met mogelijk een nieuw MongoDB ID) in de signal komt
+        this.mappingTemplates.update(templates => templates.map(t => t.name === name ? savedTemplate : t));
+        
+        this.selectedTemplateName = name;
+        this.newTemplateName = '';
+        alert(`Template "${name}" is opgeslagen.`);
+    } catch (e) {
+        this.mappingTemplates.set(oldTemplates); // Rollback
+    }
   }
   
   // --- HELPERS FOR COLORS ---
@@ -1539,6 +1946,12 @@ export class App {
     gradient += ')';
     return gradient;
   }
+  
+  // Reload Data (voor stats tab als period verandert)
+  reloadData() {
+      // In een echte app zouden we hier data ophalen op basis van de periode.
+      // Omdat we in deze implementatie alle transacties in het geheugen hebben (via loadAllData), is dit niet nodig.
+  }
 
   // --- ACTIONS ---
 
@@ -1580,7 +1993,8 @@ export class App {
       this.showBulkEditModal = true;
   }
   
-  applyBulkEdit() {
+  // Bulk Edit aanpassen om API te gebruiken
+  async applyBulkEdit() {
       // Determine final category (Dropdown or Custom Input)
       let finalCat = this.bulkEditCategory;
       if (finalCat === 'NEW') {
@@ -1594,25 +2008,46 @@ export class App {
         alert("Vul een categorie of omschrijving in om te wijzigen.");
         return;
       }
-
+      
+      const transactionsToUpdate: Transaction[] = [];
       const filteredIds = this.filteredTransactions().map(t => t.id);
       
-      this.transactions.update(current => 
-         current.map(t => {
+      // 1. Update Lokaal en verzamel de te updaten transacties
+      const updatedTxs: Transaction[] = this.transactions().map(t => {
              if (filteredIds.includes(t.id)) {
                  const updated = { ...t };
                  if (finalCat) updated.category = finalCat;
                  if (newDesc) updated.description = newDesc;
                  
                  // Run categorization rules again if description changed
-                 if (newDesc) return this.applyRulesToImport(updated);
-                 return updated;
+                 const finalUpdated = newDesc ? this.applyRulesToImport(updated) : updated;
+                 
+                 // Markeer voor API update
+                 transactionsToUpdate.push(finalUpdated);
+                 return finalUpdated;
              }
              return t;
-         })
-      );
+      });
+      
+      this.transactions.set(updatedTxs);
       this.showBulkEditModal = false;
-      alert(`${filteredIds.length} transacties bijgewerkt.`);
+      
+      // 2. API Call: Update de gewijzigde transacties
+      this.isLoading.set(true);
+      this.loadingMessage.set(`Bulk update van ${transactionsToUpdate.length} transacties...`);
+
+      try {
+          // Update ze individueel via Promise.all
+          await Promise.all(transactionsToUpdate.map(t => 
+              this.apiService.updateItem({ ...t, type: 'transaction' }) 
+          ));
+          alert(`${transactionsToUpdate.length} transacties succesvol bijgewerkt in de API.`);
+      } catch (e) {
+          alert(`Fout bij bulk update op API. Synchroniseer opnieuw: ${e.message}`);
+          this.loadAllData(); // Forceer een herlading om de lokale staat te herstellen
+      } finally {
+          this.isLoading.set(false);
+      }
   }
 
   // Helper: Smart Parse number (AANGEPAST voor Nederlandse notatie)
@@ -1650,6 +2085,10 @@ export class App {
 
   // CSV Import
   handleCsvFile(event: any) {
+    if (!this.apiConfig().token) {
+        alert("Stel eerst de API configuratie in op het tabblad 'Beheer'.");
+        return;
+    }
     const file = event.target.files[0];
     if (!file) return;
 
@@ -1673,7 +2112,7 @@ export class App {
     reader.readAsText(file);
   }
 
-  processCsvImport() {
+  async processCsvImport() {
       const { dateCol, descCol, amountCol, accountCol, balanceCol } = this.csvMapping;
       const dataRows = this.csvRawData.slice(1); 
       const newTxs: Transaction[] = [];
@@ -1714,7 +2153,7 @@ export class App {
               }
 
               let newTx: Transaction = {
-                  id: this.generateUUID(),
+                  id: this.generateUUID(), // Lokaal ID
                   date: dateStr,
                   description: row[descCol] || 'Onbekende Omschrijving',
                   amount: Math.abs(amount),
@@ -1722,11 +2161,13 @@ export class App {
                   category: 'Onbekend',
                   accountNumber: acc,
                   currentBalance: currentBal,
-                  tags: [] // Standaard leeg bij import
+                  tags: [], // Standaard leeg bij import
               };
               
               // Apply categorization rules
               newTx = this.applyRulesToImport(newTx);
+              newTx.type = newTx.type || (amount >= 0 ? 'income' : 'expense'); // Zorg dat type altijd bestaat
+              (newTx as any).type = 'transaction'; // API Marker
               
               newTxs.push(newTx);
           } catch (e) {
@@ -1735,9 +2176,26 @@ export class App {
           }
       });
 
-      this.transactions.update(curr => [...curr, ...newTxs]);
       this.showCsvModal = false;
-      alert(`${newTxs.length} transacties geïmporteerd. (${skipped} overgeslagen)`);
+      this.isLoading.set(true);
+      this.loadingMessage.set(`Bezig met importeren van ${newTxs.length} transacties naar de API...`);
+      
+      const newTxsWithApiIds: Transaction[] = [];
+      try {
+          // Bulk POST is niet ondersteund, dus we doen ze één voor één
+          for (const tx of newTxs) {
+              const savedTx = await this.apiService.addItem(tx);
+              newTxsWithApiIds.push(savedTx);
+          }
+          
+          this.transactions.update(curr => [...curr, ...newTxsWithApiIds]);
+          alert(`${newTxs.length} transacties succesvol geïmporteerd. (${skipped} overgeslagen)`);
+      } catch (e) {
+          alert(`Fout bij importeren van transacties: ${e.message}`);
+          this.loadAllData(); // Herlaad alles
+      } finally {
+          this.isLoading.set(false);
+      }
   }
 
   // CSV Export van gefilterde data
@@ -1778,6 +2236,10 @@ export class App {
 
   // Basic CRUD
   openModal(t?: Transaction) {
+    if (!this.apiConfig().token) {
+        alert("Stel eerst de API configuratie in op het tabblad 'Beheer'.");
+        return;
+    }
     this.isNewCategoryMode = false;
     if (t) { 
         this.currentTransaction = { ...t }; 
@@ -1813,7 +2275,8 @@ export class App {
 
   closeModal() { this.showModal = false; }
   
-  saveTransaction() {
+  // Save Transaction aanpassen om API te gebruiken
+  async saveTransaction() {
     // Validation
     if (!this.currentTransaction.description || this.currentTransaction.amount === null || this.currentTransaction.amount === undefined || this.currentTransaction.amount <= 0) {
       alert('Vul een geldige omschrijving en bedrag in.');
@@ -1836,33 +2299,82 @@ export class App {
     }
     
     // Add new category to manual list if it doesn't exist
-    if (this.isNewCategoryMode || !this.allCategories().includes(this.currentTransaction.category)) {
-        this.addManualCategoryFromModal(this.currentTransaction.category);
+    if (this.isNewCategoryMode || (this.currentTransaction.category && !this.allCategories().includes(this.currentTransaction.category))) {
+        this.addManualCategoryFromModal(this.currentTransaction.category); // Async, maar we wachten niet
     }
     
-    if (this.isEditing) {
-      this.transactions.update(items => items.map(item => item.id === this.currentTransaction.id ? this.currentTransaction : item));
-    } else {
-      this.currentTransaction.id = this.generateUUID(); // Safe UUID
-      this.transactions.update(items => [...items, this.currentTransaction]);
+    // Voeg API type toe aan het object
+    const finalTx = { ...this.currentTransaction, type: this.currentTransaction.type, type: 'transaction' };
+    const oldTx = this.isEditing ? this.transactions().find(t => t.id === finalTx.id) : null;
+    
+    this.isLoading.set(true);
+    this.loadingMessage.set('Transactie opslaan...');
+
+    try {
+        const savedTx = await this.saveItem(finalTx);
+        
+        if (this.isEditing) {
+            this.transactions.update(items => items.map(item => item.id === savedTx.id ? savedTx : item));
+        } else {
+            this.transactions.update(items => [...items, savedTx]);
+        }
+        this.closeModal();
+    } catch (e) {
+        // Rollback op fout
+        if (!this.isEditing) {
+            // Als het een nieuwe transactie was, verwijder deze uit de array (deze heeft nog het lokale UUID, niet de API ID)
+            this.transactions.update(items => items.filter(t => t.id !== finalTx.id));
+        } else if (oldTx) {
+            // Als het een edit was, herstel de oude waarde (die nu nog de juiste API ID heeft)
+            this.transactions.update(items => items.map(t => t.id === oldTx.id ? oldTx : t));
+        }
+    } finally {
+        this.isLoading.set(false);
     }
-    this.closeModal();
   }
   
-  addManualCategoryFromModal(name: string) {
+  async addManualCategoryFromModal(name: string) {
       const trimmedName = name.trim();
       if (!trimmedName || this.allCategories().includes(trimmedName)) return;
+      
+      const oldCats = this.manualCategories();
       this.manualCategories.update(cats => [...cats, trimmedName]);
+      
+      try {
+          await this.saveManualCategories();
+      } catch (e) {
+          this.manualCategories.set(oldCats); // Rollback
+      }
   }
 
-  deleteTransaction(id: string) { 
+  // Delete Transaction aanpassen om API te gebruiken
+  async deleteTransaction(id: string) { 
     if (!id) {
-      alert('Fout: Kan deze transactie niet verwijderen (geen ID). Probeer de data opnieuw te importeren.');
+      alert('Fout: Kan deze transactie niet verwijderen (geen ID).');
       return;
     }
-    // Simple confirm
-    if(confirm('Weet je zeker dat je deze transactie wilt verwijderen?')) {
-      this.transactions.update(items => items.filter(t => t.id !== id));
+    if(!confirm('Weet je zeker dat je deze transactie wilt verwijderen?')) {
+      return;
+    }
+    
+    const oldTxs = this.transactions();
+    const txToDelete = oldTxs.find(t => t.id === id);
+
+    this.transactions.update(items => items.filter(t => t.id !== id));
+    
+    this.isLoading.set(true);
+    this.loadingMessage.set('Transactie verwijderen...');
+
+    try {
+        await this.apiService.deleteItem(id);
+    } catch (e) {
+        // Rollback op fout
+        if (txToDelete) {
+             this.transactions.update(items => [...items, txToDelete]);
+        }
+        alert(`Fout bij verwijderen van transactie: ${e.message}`);
+    } finally {
+        this.isLoading.set(false);
     }
   }
 
@@ -1893,11 +2405,8 @@ export class App {
       .reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
   }
 
-  // Backup
-  loadFromStorage() { 
-      const s = localStorage.getItem('financeData'); 
-      if(s) this.transactions.set(JSON.parse(s)); 
-  }
+  // Backup (Lokaal)
+  // loadFromStorage en import/export van JSON/Dummy data blijft lokaal, maar werkt nu met de in-memory signals
   exportData() {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(this.transactions()));
     const a = document.createElement('a'); a.href = dataStr; a.download = "backup.json"; document.body.appendChild(a); a.click(); a.remove();
@@ -1906,24 +2415,54 @@ export class App {
       const f = e.target.files[0]; if(!f) return;
       const r = new FileReader(); 
       r.onload = (ev: any) => { 
-          if(confirm('Weet je zeker dat je alle huidige data wilt overschrijven?')) {
-              this.transactions.set(JSON.parse(ev.target.result)); 
-              alert('Hersteld!'); 
+          if(confirm('WEES VOORZICHTIG! Weet je zeker dat je alle huidige data op de API wilt overschrijven met deze lokale backup? Dit kan niet ongedaan gemaakt worden.')) {
+              this.isLoading.set(true);
+              this.loadingMessage.set('Lokale data overschrijven en uploaden naar API...');
+              
+              const importedTxs: Transaction[] = JSON.parse(ev.target.result);
+              
+              // Verwijder eerst alle bestaande transacties
+              this.apiService.deleteBulk('type', 'transaction').then(() => {
+                 // Upload de nieuwe
+                 return Promise.all(importedTxs.map(tx => {
+                     // Zorg dat ze het API type hebben en een nieuwe lokale ID voor de POST
+                     (tx as any).type = 'transaction';
+                     tx.id = this.generateUUID(); 
+                     return this.apiService.addItem(tx);
+                 }));
+              }).then(() => {
+                  alert('Data succesvol hersteld en geüpload naar de API!');
+                  this.loadAllData();
+              }).catch(err => {
+                   alert(`Fout bij herstellen: ${err.message}. Probeer handmatig opnieuw te laden.`);
+                   this.loadAllData();
+              }).finally(() => {
+                  this.isLoading.set(false);
+              });
           }
       }; 
       r.readAsText(f);
   }
-  loadDummyData() {
+  
+  // loadDummyData aanpassen om data naar API te sturen
+  async loadDummyData() {
+    if (!confirm("Weet je zeker dat je alle huidige data wilt verwijderen en wilt vervangen door dummy data op de API?")) return;
+    
+    this.isLoading.set(true);
+    this.loadingMessage.set('Genereren en uploaden van dummy data...');
+    
     const cats = ['Boodschappen', 'Huur', 'Salaris', 'Verzekering', 'Uit eten', 'Vervoer', 'Abonnementen', 'Kleding'];
-    const dummy: Transaction[] = [];
+    const dummyTxs: Transaction[] = [];
     const today = new Date();
+    
+    // 1. Genereer dummy transacties
     for(let i=0; i<80; i++) {
         const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - Math.floor(Math.random() * 365));
         const isIncome = Math.random() > 0.8;
         const cat = isIncome ? 'Salaris' : cats[Math.floor(Math.random() * (cats.length - 1))];
         const accNum = `NL${Math.floor(Math.random()*99)}BANK0${Math.floor(Math.random()*999999999)}`;
-        dummy.push({
-            id: this.generateUUID(), // Safe UUID
+        dummyTxs.push({
+            id: this.generateUUID(), 
             date: date.toISOString().slice(0,10),
             description: isIncome ? 'Werkgever BV' : `Betaling aan ${cat}`,
             amount: isIncome ? 2500 + Math.floor(Math.random() * 500) : 5 + Math.floor(Math.random() * 200),
@@ -1931,23 +2470,55 @@ export class App {
             category: cat,
             accountNumber: accNum,
             currentBalance: 1000 + Math.floor(Math.random() * 5000),
-            tags: Math.random() < 0.2 ? ['zakelijk'] : []
+            tags: Math.random() < 0.2 ? ['zakelijk'] : [],
+            type: 'transaction' as any // API Marker
         });
     }
     
-    // Add dummy rules
-    this.categorizationRules.set([
-        { id: this.generateUUID(), keyword: 'albert heijn', category: 'Boodschappen' },
-        { id: this.generateUUID(), keyword: 'netflix', category: 'Abonnementen', newDescription: 'Netflix Abonnement' },
-        { id: this.generateUUID(), keyword: 'ns', category: 'Vervoer' },
-    ]);
+    // 2. Genereer dummy regels en configuratie
+    const dummyRules: CategorizationRule[] = [
+        { id: this.generateUUID(), keyword: 'albert heijn', category: 'Boodschappen', type: 'rule' },
+        { id: this.generateUUID(), keyword: 'netflix', category: 'Abonnementen', newDescription: 'Netflix Abonnement', type: 'rule' },
+        { id: this.generateUUID(), keyword: 'ns', category: 'Vervoer', type: 'rule' },
+    ];
     
-    // Add dummy account names
-    this.accountNames.set({
-        'NL01BANK0123456789': 'Betaalrekening',
-        'NL99SPAR9876543210': 'Spaarrekening'
-    });
+    const dummyAccountNames: AccountNameRecord = {
+        id: 'account_names_singleton',
+        names: { 'NL01BANK0123456789': 'Betaalrekening', 'NL99SPAR9876543210': 'Spaarrekening' },
+        type: 'account_names'
+    };
     
-    this.transactions.set(dummy);
+    const dummyManualCats: ManualCategoryRecord = {
+        id: 'manual_categories_singleton',
+        categories: ['Vrije tijd', 'Cadeaus', 'Vakantie'],
+        type: 'manual_categories'
+    };
+
+    // 3. Verwijder bestaande data en upload de nieuwe
+    try {
+        await Promise.all([
+            this.apiService.deleteBulk('type', 'transaction'),
+            this.apiService.deleteBulk('type', 'rule'),
+            this.apiService.deleteBulk('type', 'mapping_template'),
+            this.apiService.deleteBulk('type', 'account_names'),
+            this.apiService.deleteBulk('type', 'manual_categories'),
+        ]);
+
+        // Upload de nieuwe data (alles in één batch)
+        await Promise.all([
+            ...dummyTxs.map(tx => this.apiService.addItem(tx)),
+            ...dummyRules.map(rule => this.apiService.addItem(rule)),
+            this.apiService.addItem(dummyAccountNames),
+            this.apiService.addItem(dummyManualCats),
+        ]);
+        
+        alert("Dummy data succesvol geüpload naar de API!");
+        this.loadAllData(); // Herlaad de app met de nieuwe, gesynchroniseerde data
+        
+    } catch (e) {
+        alert(`Fout bij laden dummy data: ${e.message}`);
+    } finally {
+        this.isLoading.set(false);
+    }
   }
 }
