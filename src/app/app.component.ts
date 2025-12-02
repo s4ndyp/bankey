@@ -11,7 +11,7 @@ interface Transaction {
   type: 'income' | 'expense';
   category: string;
   accountNumber?: string;
-  currentBalance?: number; // Nieuw veld: Saldo na transactie
+  currentBalance?: number; // Veld: Saldo na transactie
 }
 
 interface CsvMapping {
@@ -20,11 +20,17 @@ interface CsvMapping {
   amountCol: number;
   categoryCol?: number;
   accountCol?: number;
-  balanceCol?: number; // Nieuw veld voor import
+  balanceCol?: number;
 }
 
 interface CsvMappingTemplate extends CsvMapping {
   name: string;
+}
+
+interface CategorizationRule {
+    id: string;
+    keyword: string; // Trefwoord in omschrijving
+    category: string; // Nieuwe categorie
 }
 
 type Period = '1M' | '6M' | '1Y' | 'ALL';
@@ -54,7 +60,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
               <button *ngFor="let tab of tabs"
                 (click)="activeTab.set(tab.id)"
                 [class]="activeTab() === tab.id ? 'bg-gray-800 text-blue-400 shadow-inner' : 'text-gray-400 hover:text-white hover:bg-gray-800'"
-                class="px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200">
+                class="px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap">
                 {{ tab.label }}
               </button>
             </div>
@@ -100,7 +106,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
 
           <!-- Pivot Table -->
           <div class="bg-gray-800 rounded-xl border border-gray-700 shadow-xl overflow-hidden">
-            <div class="p-6 border-b border-gray-700 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="p-4 sm:p-6 border-b border-gray-700 flex flex-col sm:flex-row justify-between items-center gap-4">
               <h3 class="text-lg font-semibold text-white">Categorie Overzicht</h3>
               
               <!-- Dashboard Navigation Controls -->
@@ -108,7 +114,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 <button (click)="moveDashboard(-1)" class="p-2 hover:bg-gray-800 rounded-md text-gray-400 hover:text-white transition-colors">
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
                 </button>
-                <span class="px-4 text-sm font-mono font-medium text-gray-300 border-x border-gray-800 min-w-[140px] text-center">
+                <span class="px-2 sm:px-4 text-xs sm:text-sm font-mono font-medium text-gray-300 border-x border-gray-800 min-w-[140px] text-center">
                   {{ matrixData().months[5] | date:'MMM yyyy' }} - {{ matrixData().months[0] | date:'MMM yyyy' }}
                 </span>
                 <button (click)="moveDashboard(1)" class="p-2 hover:bg-gray-800 rounded-md text-gray-400 hover:text-white transition-colors">
@@ -121,18 +127,18 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
               <table class="w-full text-left text-sm whitespace-nowrap">
                 <thead>
                   <tr class="bg-gray-900/50 text-gray-400 border-b border-gray-700">
-                    <th class="p-4 font-medium sticky left-0 bg-gray-900 z-10 border-r border-gray-700">Categorie</th>
-                    <th *ngFor="let m of matrixData().months" class="p-4 font-medium text-right min-w-[100px]">
+                    <th class="p-4 font-medium sticky left-0 bg-gray-900 z-10 border-r border-gray-700 min-w-[120px]">Categorie</th>
+                    <th *ngFor="let m of matrixData().months" class="p-4 font-medium text-right min-w-[80px] sm:min-w-[100px]">
                       {{ m | date:'MMM yy' }}
                     </th>
-                    <th class="p-4 font-medium text-right bg-gray-900/30 border-l border-gray-700 text-white">Totaal</th>
+                    <th class="p-4 font-medium text-right bg-gray-900/30 border-l border-gray-700 text-white min-w-[100px]">Totaal</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr *ngFor="let cat of matrixData().categories" class="border-b border-gray-700 hover:bg-gray-700/30 transition-colors">
                     <td class="p-4 font-medium text-gray-300 sticky left-0 bg-gray-800 border-r border-gray-700 flex items-center gap-2">
-                      <span class="w-2 h-2 rounded-full" [style.background-color]="getCategoryColor(cat)"></span>
-                      {{ cat }}
+                      <span class="w-2 h-2 rounded-full flex-shrink-0" [style.background-color]="getCategoryColor(cat)"></span>
+                      <span class="truncate">{{ cat }}</span>
                     </td>
                     <td *ngFor="let m of matrixData().months" class="p-4 text-right font-mono text-gray-400">
                       <span [class.text-gray-600]="getMatrixValue(cat, m) === 0" [class.text-gray-300]="getMatrixValue(cat, m) !== 0">
@@ -145,7 +151,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                   </tr>
                   <!-- Totalen Rij -->
                   <tr class="bg-gray-900 font-bold border-t-2 border-gray-600">
-                    <td class="p-4 sticky left-0 bg-gray-900 border-r border-gray-700 text-blue-400">Totaal per Maand</td>
+                    <td class="p-4 sticky left-0 bg-gray-900 border-r border-gray-700 text-blue-400">Totaal p/mnd</td>
                     <td *ngFor="let m of matrixData().months" class="p-4 text-right font-mono"
                         [ngClass]="getMonthTotal(m) >= 0 ? 'text-green-400' : 'text-red-400'">
                       {{ getMonthTotal(m) | currency:'EUR':'symbol':'1.0-0' }}
@@ -162,13 +168,13 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
         <div *ngIf="activeTab() === 'stats'" class="animate-fade-in space-y-8">
           
           <!-- Controls -->
-          <div class="flex justify-between items-center bg-gray-800 p-4 rounded-xl border border-gray-700">
-            <h2 class="text-xl font-bold">Statistieken</h2>
+          <div class="flex flex-wrap justify-between items-center bg-gray-800 p-4 rounded-xl border border-gray-700">
+            <h2 class="text-xl font-bold mb-2 sm:mb-0">Statistieken</h2>
             <div class="flex bg-gray-900 p-1 rounded-lg">
               <button *ngFor="let p of periods" 
                 (click)="statsPeriod.set(p)"
                 [class]="statsPeriod() === p ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-400 hover:text-white'"
-                class="px-4 py-1.5 text-sm font-medium rounded-md transition-all">
+                class="px-3 py-1.5 text-sm font-medium rounded-md transition-all">
                 {{ p }}
               </button>
             </div>
@@ -181,7 +187,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg lg:col-span-2">
               <h3 class="text-lg font-semibold mb-6 flex items-center gap-2">
                 <span class="w-2 h-6 bg-blue-500 rounded-full"></span>
-                Balans Verloop ({{ statsPeriod() === 'ALL' || statsPeriod() === '1Y' ? 'Per Maand' : (statsPeriod() === '6M' ? 'Per Week' : 'Per Dag') }})
+                Balans Verloop (Groepeert per {{ statsPeriod() === '1M' ? 'Dag' : (statsPeriod() === '6M' ? 'Week' : 'Maand') }})
               </h3>
               <div class="h-64 w-full relative group">
                 <!-- SVG Line Chart -->
@@ -210,11 +216,13 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     <title>{{ point.label }}: {{ point.value | currency:'EUR' }}</title>
                   </circle>
                 </svg>
-                <!-- Labels X-axis (Smart rendering to avoid overlap) -->
-                <div class="flex justify-between mt-2 text-xs text-gray-500">
-                    <span *ngFor="let point of lineChartData(); let i = index">
-                       <!-- Only show every Nth label based on density -->
-                       <span *ngIf="shouldShowLabel(i, lineChartData().length)">{{ point.label }}</span>
+                <!-- Labels X-axis -->
+                <div class="flex justify-between mt-2 text-xs text-gray-500 overflow-hidden h-6">
+                    <span *ngFor="let point of lineChartData(); let i = index" 
+                      [ngStyle]="{'width': (100 / (lineChartData().length - 1 || 1)) + '%'}"
+                      class="text-center truncate"
+                    >
+                       <span *ngIf="shouldShowLabel(i, lineChartData().length, statsPeriod())" class="block w-full -ml-[50%]">{{ point.label }}</span>
                     </span>
                 </div>
               </div>
@@ -226,27 +234,27 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 <span class="w-2 h-6 bg-purple-500 rounded-full"></span>
                 Verdeling Categorieën (Uitgaven)
               </h3>
-              <div class="flex-1 flex items-center justify-center gap-8">
+              <div class="flex-1 flex flex-col sm:flex-row items-center justify-center gap-8">
                 <!-- Pie using Conic Gradient -->
-                <div class="relative w-48 h-48 rounded-full shadow-2xl" 
+                <div class="relative w-40 h-40 sm:w-48 sm:h-48 rounded-full shadow-2xl flex-shrink-0" 
                      [style.background]="getPieGradient()">
-                     <div class="absolute inset-4 bg-gray-800 rounded-full flex items-center justify-center flex-col">
+                     <div class="absolute inset-2 sm:inset-4 bg-gray-800 rounded-full flex items-center justify-center flex-col">
                         <span class="text-xs text-gray-400">Totaal</span>
-                        <span class="font-bold text-white">{{ pieTotal() | currency:'EUR':'symbol':'1.0-0' }}</span>
+                        <span class="font-bold text-white text-lg">{{ pieTotal() | currency:'EUR':'symbol':'1.0-0' }}</span>
                      </div>
                 </div>
                 <!-- Legend -->
-                <div class="space-y-2 text-sm max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                <div class="space-y-2 text-sm max-h-48 overflow-y-auto custom-scrollbar pr-2 w-full sm:w-auto">
                   <div *ngFor="let item of pieChartData()" class="flex items-center gap-2">
-                    <span class="w-3 h-3 rounded-full" [style.background-color]="item.color"></span>
-                    <span class="text-gray-300 flex-1">{{ item.label }}</span>
+                    <span class="w-3 h-3 rounded-full flex-shrink-0" [style.background-color]="item.color"></span>
+                    <span class="text-gray-300 flex-1 truncate">{{ item.label }}</span>
                     <span class="font-mono text-gray-400">{{ item.percentage }}%</span>
                   </div>
                 </div>
               </div>
             </div>
             
-             <!-- 3. Uitgaven per Categorie (Bar Chart - FIXED) -->
+             <!-- 3. Uitgaven per Categorie (Bar Chart) -->
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
                <h3 class="text-lg font-semibold mb-6 flex items-center gap-2">
                 <span class="w-2 h-6 bg-red-500 rounded-full"></span>
@@ -256,14 +264,14 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
               <div class="flex h-64 gap-2">
                 <!-- Y-Axis Scale (New) -->
                 <div class="flex flex-col justify-between text-xs text-gray-500 w-12 text-right pr-2 border-r border-gray-700 h-full py-1">
-                   <span>{{ getBarMax() | currency:'EUR':'symbol':'1.0-0' }}</span>
-                   <span>{{ getBarMax() / 2 | currency:'EUR':'symbol':'1.0-0' }}</span>
-                   <span>0</span>
+                   <span class="font-mono">{{ getBarMax() | currency:'EUR':'symbol':'1.0-0' }}</span>
+                   <span class="font-mono">{{ getBarMax() / 2 | currency:'EUR':'symbol':'1.0-0' }}</span>
+                   <span class="font-mono">0</span>
                 </div>
 
                 <!-- Bars Container -->
-                <div class="flex-1 flex items-end justify-between gap-2 h-full pb-1">
-                  <div *ngFor="let item of barChartData()" class="flex-1 flex flex-col items-center group h-full justify-end">
+                <div class="flex-1 flex items-end justify-between gap-2 h-full pb-1 overflow-x-auto">
+                  <div *ngFor="let item of barChartData()" class="flex-shrink-0 w-16 sm:w-20 flex flex-col items-center group h-full justify-end">
                     
                     <!-- Bar with explicit height style logic -->
                     <div class="w-full rounded-t-sm relative transition-all duration-300 hover:opacity-80" 
@@ -276,8 +284,8 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                          </div>
                     </div>
                     
-                    <!-- Rotating labels for readability -->
-                    <span class="text-xs text-gray-500 mt-2 rotate-45 sm:rotate-0 origin-left truncate w-full text-center min-h-[1.25rem]" [title]="item.label">
+                    <!-- Rotating labels for readability on small screens -->
+                    <span class="text-xs text-gray-500 mt-2 transform rotate-45 sm:rotate-0 origin-left truncate w-full text-center min-h-[1.25rem] whitespace-nowrap" [title]="item.label">
                       {{ item.label.length > 8 ? item.label.slice(0,6) + '..' : item.label }}
                     </span>
                   </div>
@@ -286,6 +294,89 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
             </div>
 
           </div>
+        </div>
+
+        <!-- === RULES & CATEGORY MANAGEMENT VIEW === -->
+        <div *ngIf="activeTab() === 'rules'" class="animate-fade-in max-w-4xl mx-auto space-y-8">
+            <h2 class="text-2xl font-bold">Regels & Categorie Beheer</h2>
+
+            <!-- Categorization Rules -->
+            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
+                <h3 class="text-xl font-semibold mb-4 text-white flex items-center gap-2">
+                  <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>
+                  Automatische Categorisatie Regels
+                </h3>
+                <p class="text-gray-400 text-sm mb-6">Transacties waarvan de omschrijving het trefwoord bevat, krijgen automatisch de gekozen categorie.</p>
+
+                <!-- New Rule Input -->
+                <div class="flex flex-col sm:flex-row gap-4 mb-6 p-4 bg-gray-900 rounded-lg border border-gray-700">
+                    <input type="text" [(ngModel)]="newRule.keyword" placeholder="Trefwoord (bv. Netflix, AH)" class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none" />
+                    
+                    <select [(ngModel)]="newRule.category" class="sm:w-48 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
+                        <option value="" disabled selected>Kies Categorie</option>
+                        <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
+                    </select>
+                    
+                    <button (click)="addRule()" class="sm:w-32 bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg transition-colors flex-shrink-0">Regel Toevoegen</button>
+                </div>
+
+                <!-- Rules List -->
+                <div class="space-y-2 max-h-64 overflow-y-auto custom-scrollbar">
+                    <div *ngFor="let rule of categorizationRules()" class="flex justify-between items-center p-3 bg-gray-900 rounded-lg border border-gray-700 hover:bg-gray-700/50 transition-colors">
+                        <div class="flex items-center gap-4 text-sm">
+                            <span class="text-gray-300 font-mono">"{{ rule.keyword }}"</span>
+                            <span class="text-gray-500">→</span>
+                            <span class="px-2 py-1 rounded-md text-xs font-bold text-white border border-white/10"
+                                [style.background-color]="getCategoryColor(rule.category) + '80'"
+                                [style.border-color]="getCategoryColor(rule.category)">
+                                {{ rule.category }}
+                            </span>
+                        </div>
+                        <button (click)="deleteRule(rule.id)" class="text-red-400 hover:text-red-300 p-1 rounded transition-colors">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
+                    <p *ngIf="categorizationRules().length === 0" class="text-center text-gray-500 p-4 border border-dashed border-gray-700 rounded-lg">Nog geen regels ingesteld.</p>
+                </div>
+            </div>
+
+            <!-- Category Management -->
+            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
+                <h3 class="text-xl font-semibold mb-4 text-white flex items-center gap-2">
+                    <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5a2 2 0 012 2v6a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2zm4 14h2m-2-4h2m-4 0v4m4-4h.01M17 3h5a2 2 0 012 2v6a2 2 0 01-2 2h-5a2 2 0 01-2-2V5a2 2 0 012-2z"></path></svg>
+                    Categorieën & Accounts Beheren
+                </h3>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Categorie Rename/Delete -->
+                    <div class="bg-gray-900 p-4 rounded-lg border border-gray-700 space-y-3">
+                        <h4 class="text-sm font-semibold text-gray-300">Aanwezige Categorieën</h4>
+                        <div *ngFor="let cat of uniqueCategories()" class="flex justify-between items-center text-sm p-1 hover:bg-gray-700/50 rounded">
+                           <div class="flex items-center gap-2">
+                               <span class="w-3 h-3 rounded-full flex-shrink-0" [style.background-color]="getCategoryColor(cat)"></span>
+                               <span class="text-gray-300 truncate">{{ cat }}</span>
+                           </div>
+                           <button (click)="renameCategory(cat)" class="text-blue-400 hover:text-blue-300 p-1" title="Hernoem">
+                               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.536L15.232 5.232z"></path></svg>
+                           </button>
+                        </div>
+                    </div>
+
+                    <!-- Account Names -->
+                    <div class="bg-gray-900 p-4 rounded-lg border border-gray-700 space-y-3">
+                        <h4 class="text-sm font-semibold text-gray-300">Rekeningen Namen (Optioneel)</h4>
+                        <p class="text-xs text-gray-500 mb-2">Geef een vriendelijke naam aan de rekeningnummers.</p>
+                        <div *ngFor="let acc of uniqueAccountNumbers()" class="flex items-center gap-2 mb-2">
+                           <span class="text-gray-400 font-mono text-xs w-24 flex-shrink-0">{{ acc }}</span>
+                           <input type="text" 
+                                  [ngModel]="getAccountName(acc)"
+                                  (ngModelChange)="setAccountName(acc, $event)"
+                                  placeholder="Naam (bv. Betaalrekening)"
+                                  class="flex-1 bg-gray-800 border border-gray-600 rounded-lg px-3 py-1 text-white text-sm focus:ring-blue-500">
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
 
@@ -312,26 +403,31 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
           </div>
 
           <!-- Filters -->
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-sm">
-            <div class="relative">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-sm">
+            <div class="relative col-span-2 md:col-span-1">
                <svg class="absolute left-3 top-3 h-5 w-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                <input 
                 type="text" 
-                placeholder="Zoek op omschrijving..." 
+                placeholder="Zoek omschrijving/cat..." 
                 [ngModel]="searchTerm()" 
                 (ngModelChange)="searchTerm.set($event)"
-                class="w-full bg-gray-900 border border-gray-600 text-white rounded-lg pl-10 pr-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow">
+                class="w-full bg-gray-900 border border-gray-600 text-white rounded-lg pl-10 pr-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
             </div>
             
-            <select [ngModel]="categoryFilter()" (ngModelChange)="categoryFilter.set($event)" class="bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
+            <select [ngModel]="categoryFilter()" (ngModelChange)="categoryFilter.set($event)" class="bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer text-sm">
               <option value="ALL">Alle Categorieën</option>
               <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
             </select>
 
-            <select [ngModel]="typeFilter()" (ngModelChange)="typeFilter.set($event)" class="bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
+            <select [ngModel]="typeFilter()" (ngModelChange)="typeFilter.set($event)" class="bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer text-sm">
               <option value="ALL">Alle Types</option>
               <option value="income">Inkomsten</option>
               <option value="expense">Uitgaven</option>
+            </select>
+            
+            <select [ngModel]="accountFilter()" (ngModelChange)="accountFilter.set($event)" class="bg-gray-900 border border-gray-600 text-white rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer text-sm">
+                <option value="ALL">Alle Rekeningen</option>
+                <option *ngFor="let acc of uniqueAccountNumbers()" [value]="acc">{{ getAccountName(acc) }}</option>
             </select>
           </div>
 
@@ -339,43 +435,43 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
           <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg">
             <div class="overflow-x-auto">
               <table class="w-full text-left">
-                <thead class="bg-gray-900/50 text-gray-400 border-b border-gray-700 text-sm uppercase tracking-wider">
+                <thead class="bg-gray-900/50 text-gray-400 border-b border-gray-700 text-xs uppercase tracking-wider whitespace-nowrap">
                   <tr>
-                    <th class="p-4 font-semibold">Datum</th>
-                    <th class="p-4 font-semibold">Rekening</th>
-                    <th class="p-4 font-semibold">Omschrijving</th>
-                    <th class="p-4 font-semibold">Categorie</th>
-                    <th class="p-4 font-semibold text-right">Bedrag</th>
-                    <th class="p-4 font-semibold text-right">Saldo</th>
-                    <th class="p-4 font-semibold text-right">Actie</th>
+                    <th class="p-3 font-semibold">Datum</th>
+                    <th class="p-3 font-semibold">Rekening</th>
+                    <th class="p-3 font-semibold">Omschrijving</th>
+                    <th class="p-3 font-semibold">Categorie</th>
+                    <th class="p-3 font-semibold text-right">Bedrag</th>
+                    <th class="p-3 font-semibold text-right">Saldo</th>
+                    <th class="p-3 font-semibold text-right min-w-[70px]">Actie</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-700">
-                  <tr *ngFor="let t of filteredTransactions()" class="group hover:bg-gray-700/50 transition-colors">
-                    <td class="p-4 text-gray-300 whitespace-nowrap font-mono text-sm">{{ t.date | date:'dd-MM-yyyy' }}</td>
-                    <td class="p-4 text-gray-400 text-sm whitespace-nowrap">{{ t.accountNumber || '-' }}</td>
-                    <td class="p-4 font-medium text-white">{{ t.description }}</td>
-                    <td class="p-4">
-                      <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold text-white border border-white/10" 
+                  <tr *ngFor="let t of filteredTransactions()" class="group hover:bg-gray-700/50 transition-colors text-sm">
+                    <td class="p-3 text-gray-300 whitespace-nowrap font-mono text-xs">{{ t.date | date:'dd-MM-yyyy' }}</td>
+                    <td class="p-3 text-gray-400 text-xs whitespace-nowrap" [title]="t.accountNumber || ''">{{ getAccountName(t.accountNumber) }}</td>
+                    <td class="p-3 font-medium text-white max-w-[200px] truncate">{{ t.description }}</td>
+                    <td class="p-3">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-bold text-white border border-white/10" 
                             [style.background-color]="getCategoryColor(t.category) + '80'" 
                             [style.border-color]="getCategoryColor(t.category)">
                         {{ t.category }}
                       </span>
                     </td>
-                    <td class="p-4 text-right font-mono font-bold" 
+                    <td class="p-3 text-right font-mono font-bold" 
                         [ngClass]="t.type === 'income' ? 'text-green-400' : 'text-red-400'">
                       {{ (t.type === 'income' ? '+' : '-') }} {{ t.amount | currency:'EUR':'symbol':'1.2-2' }}
                     </td>
-                    <td class="p-4 text-right font-mono text-gray-400 text-sm">
+                    <td class="p-3 text-right font-mono text-gray-400 text-xs">
                       {{ t.currentBalance ? (t.currentBalance | currency:'EUR':'symbol':'1.2-2') : '-' }}
                     </td>
-                    <td class="p-4 text-right">
-                      <div class="flex justify-end gap-2 opacity-100 transition-opacity">
+                    <td class="p-3 text-right">
+                      <div class="flex justify-end gap-2 opacity-100 transition-opacity whitespace-nowrap">
                          <button (click)="$event.stopPropagation(); openModal(t)" class="p-1 hover:bg-blue-900/50 rounded text-blue-400 cursor-pointer" title="Bewerken">
-                           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                          </button>
                          <button (click)="$event.stopPropagation(); deleteTransaction(t.id)" class="p-1 hover:bg-red-900/50 rounded text-red-400 cursor-pointer" title="Verwijderen">
-                           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                          </button>
                       </div>
                     </td>
@@ -423,13 +519,13 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
 
           <!-- JSON Backup Card -->
           <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg relative overflow-hidden">
-             <div class="flex gap-4">
+             <div class="flex flex-col sm:flex-row gap-4">
                 <div class="flex-1">
                   <h3 class="text-lg font-semibold mb-2 text-white">Backup Maken</h3>
                   <p class="text-xs text-gray-400 mb-4">Download al je data als JSON bestand.</p>
                   <button (click)="exportData()" class="text-sm bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded-lg border border-gray-600 w-full transition-colors">Download</button>
                 </div>
-                <div class="w-px bg-gray-700"></div>
+                <div class="w-px bg-gray-700 hidden sm:block"></div>
                 <div class="flex-1">
                    <h3 class="text-lg font-semibold mb-2 text-white">Backup Herstellen</h3>
                    <p class="text-xs text-gray-400 mb-4">Overschrijft huidige data!</p>
@@ -480,7 +576,10 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
 
                 <div>
                   <label class="block text-sm font-medium text-gray-400 mb-1">Omschrijving</label>
-                  <input type="text" [(ngModel)]="currentTransaction.description" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" placeholder="Bijv. Albert Heijn">
+                  <input type="text" 
+                    [(ngModel)]="currentTransaction.description" 
+                    (ngModelChange)="applyRulesToNewDescription($event)"
+                    class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" placeholder="Bijv. Albert Heijn">
                 </div>
                 
                 <div class="grid grid-cols-2 gap-4">
@@ -520,7 +619,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                       
                       <!-- Toon alleen als 'Nieuwe Categorie' is gekozen -->
                       <div *ngIf="isNewCategoryMode" class="animate-fade-in relative">
-                         <input type="text" [(ngModel)]="currentTransaction.category" #newCatInput
+                         <input type="text" [(ngModel)]="currentTransaction.category" 
                                 class="w-full bg-gray-800 border border-blue-500 rounded-lg px-4 py-2.5 text-white focus:outline-none" 
                                 placeholder="Typ nieuwe categorie naam...">
                          <button (click)="isNewCategoryMode = false; currentTransaction.category = uniqueCategories()[0] || 'Algemeen'" class="absolute right-2 top-2 text-xs text-red-400 hover:text-white bg-gray-900 px-2 py-1 rounded">Annuleer</button>
@@ -630,7 +729,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 </div>
              </div>
 
-             <div class="px-6 py-4 bg-gray-900/50 flex justify-end gap-3 border-t border-gray-700">
+             <div class="px-6 py-4 bg-gray-900/50 flex flex-col sm:flex-row justify-end gap-3 border-t border-gray-700">
                 <button (click)="processCsvImport()" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-medium transition-colors">
                    Importeren
                 </button>
@@ -686,6 +785,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
     </div>
   `,
   styles: [`
+    /* Custom Scrollbar */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #111827; }
     ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
@@ -693,6 +793,24 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
     .animate-fade-in { animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+    
+    /* Responsive Table Fixes (Ensures data wraps better on tiny screens) */
+    @media (max-width: 640px) {
+        .overflow-x-auto table {
+            font-size: 0.75rem; /* text-xs */
+        }
+        .overflow-x-auto th, .overflow-x-auto td {
+            padding: 0.5rem; /* p-2 */
+        }
+        .overflow-x-auto th:nth-child(3), 
+        .overflow-x-auto td:nth-child(3) {
+            min-width: 150px; /* Description column */
+        }
+        .overflow-x-auto th:nth-child(6), 
+        .overflow-x-auto td:nth-child(6) {
+            min-width: 80px; /* Balance column */
+        }
+    }
   `]
 })
 export class App {
@@ -701,21 +819,27 @@ export class App {
     { id: 'dashboard', label: 'Overzicht' },
     { id: 'transactions', label: 'Transacties' },
     { id: 'stats', label: 'Statistieken' },
+    { id: 'rules', label: 'Regels' }, // Nieuw Tabblad
     { id: 'settings', label: 'Beheer' }
   ];
   activeTab = signal<string>('dashboard');
 
   // Data
   transactions = signal<Transaction[]>([]);
-  mappingTemplates = signal<CsvMappingTemplate[]>([]); // NEW: Templates
+  mappingTemplates = signal<CsvMappingTemplate[]>([]);
+  categorizationRules = signal<CategorizationRule[]>([]); // NIEUW: Regels
   
-  // Dashboard Navigation State (new)
+  // Account/Category names lookup
+  accountNames = signal<Record<string, string>>({}); // NIEUW: Vriendelijke namen voor rekeningen
+  
+  // Dashboard Navigation State
   dashboardMonthOffset = signal(0);
   
-  // Transaction List Filters (Now Signals!)
+  // Transaction List Filters (Signals)
   searchTerm = signal('');
   categoryFilter = signal('ALL');
   typeFilter = signal('ALL');
+  accountFilter = signal('ALL'); // NIEUW: Filter op rekeningnummer
 
   // Stats State
   statsPeriod = signal<Period>('6M');
@@ -724,7 +848,7 @@ export class App {
   // Transaction Modal State
   showModal = false;
   isEditing = false;
-  isNewCategoryMode = false; // Toggle voor categorie input
+  isNewCategoryMode = false;
   currentTransaction: Transaction = this.getEmptyTransaction();
 
   // CSV Import State
@@ -733,18 +857,23 @@ export class App {
   csvPreviewHeaders: string[] = [];
   csvPreviewRow: string[] = [];
   csvMapping: CsvMapping = { dateCol: 0, descCol: 1, amountCol: 2, accountCol: undefined, balanceCol: undefined };
-  selectedTemplateName: string = ''; // For selection dropdown
-  newTemplateName: string = ''; // For saving new template
+  selectedTemplateName: string = '';
+  newTemplateName: string = '';
 
   // Bulk Edit State
   showBulkEditModal = false;
   bulkEditCategory = '';
   bulkEditCustomCategory = '';
   bulkEditDescription = '';
-
+  
+  // Rules Tab State
+  newRule: CategorizationRule = { id: this.generateUUID(), keyword: '', category: '' };
+  
   constructor() {
     this.loadFromStorage();
-    this.loadMappingTemplates(); // Load templates on startup
+    this.loadMappingTemplates();
+    this.loadRules(); // Load rules
+    this.loadAccountNames(); // Load account names
     
     // Save data on change
     effect(() => {
@@ -754,8 +883,108 @@ export class App {
     effect(() => {
         try { localStorage.setItem('financeMappingTemplates', JSON.stringify(this.mappingTemplates())); } catch (e) {}
     });
+    // Save rules on change
+    effect(() => {
+        try { localStorage.setItem('financeRules', JSON.stringify(this.categorizationRules())); } catch (e) {}
+    });
+    // Save account names on change
+    effect(() => {
+        try { localStorage.setItem('financeAccountNames', JSON.stringify(this.accountNames())); } catch (e) {}
+    });
   }
 
+  // --- ACCOUNT & CATEGORY MANAGEMENT ---
+  
+  // Accounts
+  loadAccountNames() {
+      try { const names = localStorage.getItem('financeAccountNames'); if (names) this.accountNames.set(JSON.parse(names)); } catch (e) {}
+  }
+  getAccountName(accNum?: string): string {
+      if (!accNum) return '-';
+      return this.accountNames()[accNum] || accNum;
+  }
+  setAccountName(accNum: string, name: string) {
+      this.accountNames.update(names => {
+          names[accNum] = name;
+          return { ...names };
+      });
+  }
+  uniqueAccountNumbers = computed(() => {
+      const accs = new Set(this.transactions().map(t => t.accountNumber).filter(a => a));
+      return Array.from(accs).sort();
+  });
+  
+  // Categories
+  renameCategory(oldCat: string) {
+      const newCat = prompt(`Hernoem categorie "${oldCat}" naar:`);
+      if (!newCat || newCat === oldCat) return;
+
+      this.transactions.update(items => items.map(t => ({
+          ...t,
+          category: t.category === oldCat ? newCat : t.category
+      })));
+      
+      // Update rules as well
+      this.categorizationRules.update(rules => rules.map(r => ({
+          ...r,
+          category: r.category === oldCat ? newCat : r.category
+      })));
+  }
+
+  // --- AUTOMATIC CATEGORIZATION RULES (1) ---
+  
+  loadRules() {
+      try { const rules = localStorage.getItem('financeRules'); if (rules) this.categorizationRules.set(JSON.parse(rules)); } catch (e) {}
+  }
+  
+  addRule() {
+      if (!this.newRule.keyword || !this.newRule.category) {
+          alert('Trefwoord en Categorie zijn verplicht.');
+          return;
+      }
+      const ruleToAdd = { 
+          id: this.generateUUID(), 
+          keyword: this.newRule.keyword.toLowerCase().trim(), 
+          category: this.newRule.category 
+      };
+      
+      this.categorizationRules.update(rules => [...rules, ruleToAdd]);
+      this.newRule.keyword = '';
+      this.newRule.category = '';
+  }
+  
+  deleteRule(id: string) {
+      this.categorizationRules.update(rules => rules.filter(r => r.id !== id));
+  }
+  
+  // Apply rules when typing in the modal
+  applyRulesToNewDescription(description: string) {
+      const rules = this.categorizationRules();
+      const lowerDesc = description.toLowerCase();
+      
+      for (const rule of rules) {
+          if (lowerDesc.includes(rule.keyword)) {
+              // Set the category but don't force a re-render yet
+              this.currentTransaction.category = rule.category;
+              return; 
+          }
+      }
+  }
+
+  // Apply rules to new transactions during CSV Import
+  applyRulesToImport(tx: Transaction): Transaction {
+      const rules = this.categorizationRules();
+      const lowerDesc = tx.description.toLowerCase();
+      
+      for (const rule of rules) {
+          if (lowerDesc.includes(rule.keyword)) {
+              tx.category = rule.category;
+              return tx;
+          }
+      }
+      return tx;
+  }
+  
   // --- TEMPLATE LOGIC ---
 
   loadMappingTemplates() {
@@ -846,11 +1075,12 @@ export class App {
 
   // --- COMPUTES ---
 
-  // Main Filter Logic
+  // Main Filter Logic (Updated to include accountFilter)
   filteredTransactions = computed(() => {
     const term = this.searchTerm().toLowerCase();
     const catFilter = this.categoryFilter();
     const tFilter = this.typeFilter();
+    const aFilter = this.accountFilter(); // NIEUW
 
     return this.transactions()
       .filter(t => {
@@ -858,7 +1088,8 @@ export class App {
                               t.category.toLowerCase().includes(term);
         const matchesCat = catFilter === 'ALL' || t.category === catFilter;
         const matchesType = tFilter === 'ALL' || t.type === tFilter;
-        return matchesSearch && matchesCat && matchesType;
+        const matchesAccount = aFilter === 'ALL' || t.accountNumber === aFilter; // NIEUW
+        return matchesSearch && matchesCat && matchesType && matchesAccount;
       })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   });
@@ -872,8 +1103,6 @@ export class App {
   // Top Cards Stats
   totalStats = computed(() => {
     const now = new Date();
-    // Offset applied here? Probably not necessary for Total Stats (usually YTD)
-    // But let's stick to standard YTD
     const currentYear = now.getFullYear();
     const txs = this.transactions().filter(t => new Date(t.date).getFullYear() === currentYear);
     const income = txs.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
@@ -887,7 +1116,6 @@ export class App {
     const offset = this.dashboardMonthOffset();
     const baseDate = new Date(); // Today
     
-    // Adjust base date by offset
     baseDate.setMonth(baseDate.getMonth() + offset);
 
     const months: string[] = [];
@@ -948,11 +1176,15 @@ export class App {
   getBarMax() {
       const data = this.barChartData();
       if (!data.length) return 0;
-      // Reverse calculation to get the 'max' value used for scaling
-      return Math.max(...data.map(d => (d.value / d.pct) * 100), 100);
+      // Find the maximum value and round it up to the nearest 100 or 1000 for a clean axis.
+      const maxVal = Math.max(...data.map(d => d.value), 10);
+      
+      if (maxVal < 100) return Math.ceil(maxVal / 10) * 10;
+      if (maxVal < 1000) return Math.ceil(maxVal / 100) * 100;
+      return Math.ceil(maxVal / 500) * 500;
   }
 
-  // UPDATED: Line Chart Data now ONLY uses currentBalance
+  // Line Chart Data ONLY uses currentBalance
   lineChartData = computed(() => {
     const txs = this.statsFilteredData();
     const sortedTxs = [...txs].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -960,13 +1192,13 @@ export class App {
     
     // 1. Determine grouping key
     const getGroupKey = (dateStr: string) => {
+      const d = new Date(dateStr);
       if (period === '1M') return dateStr; // Day by Day
       if (period === '1Y' || period === 'ALL') return dateStr.slice(0, 7); // YYYY-MM
       
       // Weekly for 6M
-      const d = new Date(dateStr);
       d.setHours(0,0,0,0);
-      d.setDate(d.getDate() + 4 - (d.getDay() || 7)); // Nearest Thu
+      d.setDate(d.getDate() + 4 - (d.getDay() || 7)); 
       const yearStart = new Date(d.getFullYear(),0,1);
       const weekNo = Math.ceil(( ( (d.getTime() - yearStart.getTime()) / 86400000) + 1)/7);
       return `${d.getFullYear()}-W${weekNo}`;
@@ -1010,7 +1242,7 @@ export class App {
       return this.lineChartData().map(p => `${p.x},${p.y}`).join(' ');
   });
 
-  // Updated Pie Chart using consistent colors
+  // Pie Chart using consistent colors
   pieChartData = computed(() => {
     const txs = this.statsFilteredData().filter(t => t.type === 'expense');
     const totals = new Map<string, number>();
@@ -1035,7 +1267,7 @@ export class App {
 
   getPieGradient() {
     const data = this.pieChartData();
-    if (!data.length) return 'gray';
+    if (!data.length) return '#1F2937'; // gray-800
     
     let gradient = 'conic-gradient(';
     let currentDeg = 0;
@@ -1053,11 +1285,17 @@ export class App {
 
   // --- ACTIONS ---
 
-  shouldShowLabel(index: number, total: number): boolean {
-    if (total <= 10) return true;
-    if (total <= 20) return index % 2 === 0;
-    if (total <= 50) return index % 5 === 0;
-    return index % 10 === 0;
+  shouldShowLabel(index: number, total: number, period: Period): boolean {
+    if (total <= 1) return true;
+    
+    // Day by Day: show every 7th day
+    if (period === '1M') return index % 7 === 0;
+
+    // Weekly or Monthly: be aggressive on hiding labels if over 12 points
+    if (total <= 12) return true;
+    if (total <= 24) return index % 2 === 0;
+    if (total <= 52) return index % 4 === 0;
+    return index % 8 === 0;
   }
 
   // Helper for safe UUID (works in non-secure contexts)
@@ -1065,7 +1303,7 @@ export class App {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
       return crypto.randomUUID();
     }
-    // Fallback for older browsers or insecure contexts (HTTP)
+    // Fallback
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
       var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
       return v.toString(16);
@@ -1108,6 +1346,9 @@ export class App {
                  const updated = { ...t };
                  if (finalCat) updated.category = finalCat;
                  if (newDesc) updated.description = newDesc;
+                 
+                 // Run categorization rules again if description changed
+                 if (newDesc) return this.applyRulesToImport(updated);
                  return updated;
              }
              return t;
@@ -1123,28 +1364,30 @@ export class App {
       amountStr = amountStr.trim();
       let amount = 0;
               
-      // Case 1: Contains both . and ,
+      // Strip currency signs and spaces
+      amountStr = amountStr.replace(/[€$£]/g, '').replace(/\s/g, '');
+
+      // Case 1: Contains both . and , (e.g., 1.250,50 NL or 1,250.50 US)
       if (amountStr.includes(',') && amountStr.includes('.')) {
             if (amountStr.lastIndexOf(',') > amountStr.lastIndexOf('.')) {
-                // 1.250,50 (NL)
+                // 1.250,50 (NL) -> remove thousands separator, replace comma with dot
                 amountStr = amountStr.replace(/\./g, '').replace(',', '.');
             } else {
-                // 1,250.50 (US)
+                // 1,250.50 (US) -> remove thousands separator
                 amountStr = amountStr.replace(/,/g, '');
             }
       } 
       // Case 2: Only comma
       else if (amountStr.includes(',')) {
-            // Often Dutch decimal (10,50)
+            // Assume comma is decimal separator (NL: 10,50)
             amountStr = amountStr.replace(',', '.');
       }
       // Case 3: Only dot
       else if (amountStr.includes('.')) {
-            // Can be 10.50 (US decimal) or 1.000 (NL Thousand)
-            // Heuristic: If there is more than one dot, it's definitely thousands
+            // If there are 3 digits after the dot, assume it's a thousand separator (1.000)
             const parts = amountStr.split('.');
-            if (parts.length > 2) {
-                amountStr = amountStr.replace(/\./g, '');
+            if (parts.length > 1 && parts[parts.length - 1].length === 3) {
+                 amountStr = amountStr.replace(/\./g, '');
             }
       }
 
@@ -1184,42 +1427,33 @@ export class App {
       let skipped = 0;
 
       dataRows.forEach((row, index) => {
-          if (row.length < Math.max(dateCol, descCol, amountCol)) {
-             console.warn(`Row ${index} incomplete`, row);
+          if (row.length < Math.max(dateCol, descCol, amountCol, accountCol || 0, balanceCol || 0)) {
              return;
           }
 
           try {
               let amount = this.parseSmartNumber(row[amountCol]);
-              
-              if (amount === 0 && row[amountCol] !== '0') { 
-                 // It might be genuinely 0, but check validity
+              if (amount === 0 && row[amountCol] !== '0' && row[amountCol] !== '0,00') { 
+                  // Skip if parsing failed on non-zero input
+                  throw new Error('Invalid Amount');
               }
-
+              
               let dateRaw = row[dateCol];
               let dateStr = '';
               
               // Robust Date Parsing
-              if (dateRaw.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                  // ISO already: YYYY-MM-DD
-                  dateStr = dateRaw;
-              } else if (dateRaw.match(/^\d{1,2}-\d{1,2}-\d{4}$/)) {
-                  // NL: DD-MM-YYYY
+              if (dateRaw.match(/^\d{4}-\d{2}-\d{2}$/)) { dateStr = dateRaw; } 
+              else if (dateRaw.match(/^\d{1,2}-\d{1,2}-\d{4}$/)) {
                   const parts = dateRaw.split('-');
                   dateStr = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
               } else if (dateRaw.match(/^\d{8}$/)) {
-                  // Compact: YYYYMMDD
                   dateStr = `${dateRaw.slice(0,4)}-${dateRaw.slice(4,6)}-${dateRaw.slice(6,8)}`;
               } else {
-                 // Try generic
                  const tryDate = new Date(dateRaw);
-                 if (!isNaN(tryDate.getTime())) {
-                   dateStr = tryDate.toISOString().slice(0, 10);
-                 } else {
-                   throw new Error('Invalid Date format');
-                 }
+                 if (isNaN(tryDate.getTime())) throw new Error('Invalid Date format');
+                 dateStr = tryDate.toISOString().slice(0, 10);
               }
-
+              
               const type = amount >= 0 ? 'income' : 'expense';
               const acc = accountCol !== undefined ? row[accountCol] : undefined;
               
@@ -1228,16 +1462,21 @@ export class App {
                   currentBal = this.parseSmartNumber(row[balanceCol]);
               }
 
-              newTxs.push({
+              let newTx: Transaction = {
                   id: this.generateUUID(),
                   date: dateStr,
-                  description: row[descCol],
+                  description: row[descCol] || 'Onbekende Omschrijving',
                   amount: Math.abs(amount),
                   type: type,
                   category: 'Onbekend',
                   accountNumber: acc,
                   currentBalance: currentBal
-              });
+              };
+              
+              // Apply categorization rules (1)
+              newTx = this.applyRulesToImport(newTx);
+              
+              newTxs.push(newTx);
           } catch (e) {
               console.error(`Row ${index} error:`, e);
               skipped++;
@@ -1275,13 +1514,9 @@ export class App {
   closeModal() { this.showModal = false; }
   
   saveTransaction() {
-    // Validation with Feedback
-    if (!this.currentTransaction.description) {
-      alert('Vul een omschrijving in.');
-      return;
-    }
-    if (this.currentTransaction.amount === null || this.currentTransaction.amount === undefined) {
-      alert('Vul een bedrag in.');
+    // Validation
+    if (!this.currentTransaction.description || this.currentTransaction.amount === null || this.currentTransaction.amount === undefined || this.currentTransaction.amount <= 0) {
+      alert('Vul een geldige omschrijving en bedrag in.');
       return;
     }
     if (this.isNewCategoryMode && !this.currentTransaction.category) {
@@ -1289,6 +1524,12 @@ export class App {
         return;
     }
 
+    // Apply rules on save (only if it's a new or description changed)
+    const txToSave = { ...this.currentTransaction };
+    if (!this.isEditing) {
+        this.currentTransaction = this.applyRulesToImport(txToSave);
+    }
+    
     if (this.isEditing) {
       this.transactions.update(items => items.map(item => item.id === this.currentTransaction.id ? this.currentTransaction : item));
     } else {
@@ -1336,14 +1577,24 @@ export class App {
   }
 
   // Backup
-  loadFromStorage() { const s = localStorage.getItem('financeData'); if(s) this.transactions.set(JSON.parse(s)); }
+  loadFromStorage() { 
+      const s = localStorage.getItem('financeData'); 
+      if(s) this.transactions.set(JSON.parse(s)); 
+  }
   exportData() {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(this.transactions()));
     const a = document.createElement('a'); a.href = dataStr; a.download = "backup.json"; document.body.appendChild(a); a.click(); a.remove();
   }
   importJson(e: any) {
       const f = e.target.files[0]; if(!f) return;
-      const r = new FileReader(); r.onload = (ev: any) => { this.transactions.set(JSON.parse(ev.target.result)); alert('Hersteld!'); }; r.readAsText(f);
+      const r = new FileReader(); 
+      r.onload = (ev: any) => { 
+          if(confirm('Weet je zeker dat je alle huidige data wilt overschrijven?')) {
+              this.transactions.set(JSON.parse(ev.target.result)); 
+              alert('Hersteld!'); 
+          }
+      }; 
+      r.readAsText(f);
   }
   loadDummyData() {
     const cats = ['Boodschappen', 'Huur', 'Salaris', 'Verzekering', 'Uit eten', 'Vervoer', 'Abonnementen', 'Kleding'];
@@ -1353,6 +1604,7 @@ export class App {
         const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - Math.floor(Math.random() * 365));
         const isIncome = Math.random() > 0.8;
         const cat = isIncome ? 'Salaris' : cats[Math.floor(Math.random() * (cats.length - 1))];
+        const accNum = `NL${Math.floor(Math.random()*99)}BANK0${Math.floor(Math.random()*999999999)}`;
         dummy.push({
             id: this.generateUUID(), // Safe UUID
             date: date.toISOString().slice(0,10),
@@ -1360,10 +1612,24 @@ export class App {
             amount: isIncome ? 2500 + Math.floor(Math.random() * 500) : 5 + Math.floor(Math.random() * 200),
             type: isIncome ? 'income' : 'expense',
             category: cat,
-            accountNumber: `NL${Math.floor(Math.random()*99)}BANK0${Math.floor(Math.random()*999999999)}`,
+            accountNumber: accNum,
             currentBalance: 1000 + Math.floor(Math.random() * 5000)
         });
     }
+    
+    // Add dummy rules
+    this.categorizationRules.set([
+        { id: this.generateUUID(), keyword: 'albert heijn', category: 'Boodschappen' },
+        { id: this.generateUUID(), keyword: 'netflix', category: 'Abonnementen' },
+        { id: this.generateUUID(), keyword: 'ns', category: 'Vervoer' },
+    ]);
+    
+    // Add dummy account names
+    this.accountNames.set({
+        'NL01BANK0123456789': 'Betaalrekening',
+        'NL99SPAR9876543210': 'Spaarrekening'
+    });
+    
     this.transactions.set(dummy);
   }
 }
