@@ -1358,40 +1358,44 @@ export class App {
       alert(`${filteredIds.length} transacties bijgewerkt.`);
   }
 
-  // Helper: Smart Parse number
+  // Helper: Smart Parse number (FIXED)
   parseSmartNumber(amountStr: string): number {
       if (!amountStr) return 0;
       amountStr = amountStr.trim();
-      let amount = 0;
-              
-      // Strip currency signs and spaces
-      amountStr = amountStr.replace(/[€$£]/g, '').replace(/\s/g, '');
+      
+      // Stap 1: Bepaal of de laatste scheidingsteken een komma of een punt is
+      const lastComma = amountStr.lastIndexOf(',');
+      const lastDot = amountStr.lastIndexOf('.');
 
-      // Case 1: Contains both . and , (e.g., 1.250,50 NL or 1,250.50 US)
-      if (amountStr.includes(',') && amountStr.includes('.')) {
-            if (amountStr.lastIndexOf(',') > amountStr.lastIndexOf('.')) {
-                // 1.250,50 (NL) -> remove thousands separator, replace comma with dot
-                amountStr = amountStr.replace(/\./g, '').replace(',', '.');
-            } else {
-                // 1,250.50 (US) -> remove thousands separator
-                amountStr = amountStr.replace(/,/g, '');
-            }
-      } 
-      // Case 2: Only comma
-      else if (amountStr.includes(',')) {
-            // Assume comma is decimal separator (NL: 10,50)
-            amountStr = amountStr.replace(',', '.');
-      }
-      // Case 3: Only dot
-      else if (amountStr.includes('.')) {
-            // If there are 3 digits after the dot, assume it's a thousand separator (1.000)
-            const parts = amountStr.split('.');
-            if (parts.length > 1 && parts[parts.length - 1].length === 3) {
-                 amountStr = amountStr.replace(/\./g, '');
-            }
+      // De scheidingsteken die het laatst voorkomt, is waarschijnlijk de decimaal
+      let cleanStr: string;
+      if (lastComma > lastDot) {
+          // Nederlandse notatie (1.234,56). Verwijder punten, vervang komma door punt.
+          cleanStr = amountStr.replace(/\./g, '').replace(',', '.');
+      } else if (lastDot > lastComma) {
+          // Engelse notatie (1,234.56). Verwijder komma's, behoud punt.
+          cleanStr = amountStr.replace(/,/g, '');
+      } else {
+          // Geen scheidingstekens of beide op dezelfde plek (wat vreemd is). Stript alles behalve cijfers/punt/min.
+          cleanStr = amountStr.replace(/[^0-9.-]/g, '');
       }
 
-      amount = parseFloat(amountStr);
+      // Strippen van overige tekens (valuta, spaties) en extra punten/komma's.
+      // Zorg ervoor dat alleen het laatste punt (decimaal) overblijft.
+      cleanStr = cleanStr.replace(/[^\d.-]/g, ''); // Alleen cijfers, punt en min
+      
+      // Controle op lege string na schoonmaken (geeft 0 terug)
+      if (cleanStr === '' || cleanStr === '.') return 0;
+      
+      const amount = parseFloat(cleanStr);
+      
+      // Vorig probleem: Als parseFloat faalt op een geldige string (bijv. "10."), wordt 0 teruggegeven en de error getriggerd.
+      // We triggeren de error nu alleen als de originele string niet leeg was en het resultaat ongeldig is.
+      if (isNaN(amount) && amountStr !== '') {
+         // Trigger de error die in de console wordt gelogd (zodat de regel wordt overgeslagen).
+         throw new Error('Invalid Amount');
+      }
+      
       return isNaN(amount) ? 0 : amount;
   }
 
@@ -1432,11 +1436,8 @@ export class App {
           }
 
           try {
+              // Geen validatie meer hier. De parser gooit zelf een error op als het echt niet lukt.
               let amount = this.parseSmartNumber(row[amountCol]);
-              if (amount === 0 && row[amountCol] !== '0' && row[amountCol] !== '0,00') { 
-                  // Skip if parsing failed on non-zero input
-                  throw new Error('Invalid Amount');
-              }
               
               let dateRaw = row[dateCol];
               let dateStr = '';
@@ -1445,6 +1446,7 @@ export class App {
               if (dateRaw.match(/^\d{4}-\d{2}-\d{2}$/)) { dateStr = dateRaw; } 
               else if (dateRaw.match(/^\d{1,2}-\d{1,2}-\d{4}$/)) {
                   const parts = dateRaw.split('-');
+                  // Herkent DD-MM-YYYY of D-M-YYYY
                   dateStr = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
               } else if (dateRaw.match(/^\d{8}$/)) {
                   dateStr = `${dateRaw.slice(0,4)}-${dateRaw.slice(4,6)}-${dateRaw.slice(6,8)}`;
