@@ -25,6 +25,7 @@ interface MonthlySummary {
   imports: [CommonModule, FormsModule, DatePipe, CurrencyPipe, DecimalPipe],
   encapsulation: ViewEncapsulation.None,
   template: `
+    <!-- De hoofdcontainer met Tailwind classes voor donkere modus -->
     <div class="min-h-screen bg-gray-900 text-gray-100 font-sans selection:bg-blue-500 selection:text-white">
       
       <!-- Navbar -->
@@ -33,13 +34,16 @@ interface MonthlySummary {
           <div class="flex items-center justify-between h-16">
             <div class="flex items-center gap-2">
               <div class="bg-blue-600 p-2 rounded-lg">
+                <!-- Inline SVG Logo -->
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
               <span class="font-bold text-xl tracking-tight">MijnFinanciën</span>
             </div>
-            <div class="flex space-x-4">
+            
+            <!-- Navigatie Knoppen -->
+            <div class="flex space-x-2 sm:space-x-4">
               <button 
                 (click)="activeTab.set('dashboard')"
                 [class]="activeTab() === 'dashboard' ? 'bg-gray-800 text-blue-400' : 'text-gray-400 hover:text-white hover:bg-gray-800'"
@@ -56,7 +60,7 @@ interface MonthlySummary {
                 (click)="activeTab.set('settings')"
                 [class]="activeTab() === 'settings' ? 'bg-gray-800 text-blue-400' : 'text-gray-400 hover:text-white hover:bg-gray-800'"
                 class="px-3 py-2 rounded-md text-sm font-medium transition-colors">
-                Data & Settings
+                Beheer
               </button>
             </div>
           </div>
@@ -66,12 +70,12 @@ interface MonthlySummary {
       <!-- Main Content -->
       <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-12">
         
-        <!-- DASHBOARD VIEW -->
+        <!-- VIEW: DASHBOARD -->
         <div *ngIf="activeTab() === 'dashboard'" class="animate-fade-in">
           <div class="mb-8">
             <h2 class="text-2xl font-bold mb-4">Financieel Dashboard</h2>
             
-            <!-- Key Metrics Cards -->
+            <!-- Statistieken Kaarten -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
               <div class="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg">
                 <p class="text-gray-400 text-sm font-medium uppercase">Totaal Inkomsten (Dit Jaar)</p>
@@ -89,7 +93,7 @@ interface MonthlySummary {
               </div>
             </div>
 
-            <!-- Matrix / Pivot Table -->
+            <!-- Matrix / Pivot Tabel -->
             <div class="bg-gray-800 rounded-xl border border-gray-700 shadow-lg overflow-hidden">
               <div class="p-6 border-b border-gray-700 flex justify-between items-center">
                 <h3 class="text-lg font-semibold">Categorieën per Maand (Laatste 6 maanden)</h3>
@@ -118,7 +122,7 @@ interface MonthlySummary {
                         {{ getMatrixRowTotal(cat) | currency:'EUR':'symbol':'1.0-0' }}
                       </td>
                     </tr>
-                    <!-- Totals Row -->
+                    <!-- Totaal Rij -->
                     <tr class="bg-gray-900 font-bold border-t-2 border-gray-600">
                       <td class="p-4 sticky left-0 bg-gray-900 border-r border-gray-700">Totaal per Maand</td>
                       <td *ngFor="let m of matrixData().months" class="p-4 text-right font-mono"
@@ -134,7 +138,7 @@ interface MonthlySummary {
           </div>
         </div>
 
-        <!-- TRANSACTIONS VIEW -->
+        <!-- VIEW: TRANSACTIONS -->
         <div *ngIf="activeTab() === 'transactions'" class="animate-fade-in">
           <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
             <h2 class="text-2xl font-bold">Alle Transacties</h2>
@@ -166,47 +170,49 @@ interface MonthlySummary {
             </select>
           </div>
 
-          <!-- List -->
+          <!-- Lijst -->
           <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg">
-            <table class="w-full text-left">
-              <thead class="bg-gray-900/50 text-gray-400 border-b border-gray-700">
-                <tr>
-                  <th class="p-4 font-medium">Datum</th>
-                  <th class="p-4 font-medium">Omschrijving</th>
-                  <th class="p-4 font-medium">Categorie</th>
-                  <th class="p-4 font-medium text-right">Bedrag</th>
-                  <th class="p-4 font-medium text-right">Acties</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-700">
-                <tr *ngFor="let t of filteredTransactions()" class="group hover:bg-gray-700/50 transition-colors">
-                  <td class="p-4 text-gray-300 whitespace-nowrap">{{ t.date | date:'dd-MM-yyyy' }}</td>
-                  <td class="p-4 font-medium text-white">{{ t.description }}</td>
-                  <td class="p-4">
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-700 text-gray-300 border border-gray-600">
-                      {{ t.category }}
-                    </span>
-                  </td>
-                  <td class="p-4 text-right font-mono font-bold" 
-                      [ngClass]="t.type === 'income' ? 'text-green-400' : 'text-red-400'">
-                    {{ (t.type === 'income' ? '+' : '-') }} {{ t.amount | currency:'EUR':'symbol':'1.2-2' }}
-                  </td>
-                  <td class="p-4 text-right space-x-2">
-                    <button (click)="editTransaction(t)" class="text-blue-400 hover:text-blue-300 opacity-0 group-hover:opacity-100 transition-opacity">Bewerken</button>
-                    <button (click)="deleteTransaction(t.id)" class="text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100 transition-opacity">Verwijderen</button>
-                  </td>
-                </tr>
-                <tr *ngIf="filteredTransactions().length === 0">
-                  <td colspan="5" class="p-8 text-center text-gray-500">
-                    Geen transacties gevonden voor deze filters.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left">
+                <thead class="bg-gray-900/50 text-gray-400 border-b border-gray-700">
+                  <tr>
+                    <th class="p-4 font-medium">Datum</th>
+                    <th class="p-4 font-medium">Omschrijving</th>
+                    <th class="p-4 font-medium">Categorie</th>
+                    <th class="p-4 font-medium text-right">Bedrag</th>
+                    <th class="p-4 font-medium text-right">Acties</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-700">
+                  <tr *ngFor="let t of filteredTransactions()" class="group hover:bg-gray-700/50 transition-colors">
+                    <td class="p-4 text-gray-300 whitespace-nowrap">{{ t.date | date:'dd-MM-yyyy' }}</td>
+                    <td class="p-4 font-medium text-white">{{ t.description }}</td>
+                    <td class="p-4">
+                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-700 text-gray-300 border border-gray-600">
+                        {{ t.category }}
+                      </span>
+                    </td>
+                    <td class="p-4 text-right font-mono font-bold" 
+                        [ngClass]="t.type === 'income' ? 'text-green-400' : 'text-red-400'">
+                      {{ (t.type === 'income' ? '+' : '-') }} {{ t.amount | currency:'EUR':'symbol':'1.2-2' }}
+                    </td>
+                    <td class="p-4 text-right space-x-2">
+                      <button (click)="editTransaction(t)" class="text-blue-400 hover:text-blue-300 opacity-50 hover:opacity-100 transition-opacity">Bewerken</button>
+                      <button (click)="deleteTransaction(t.id)" class="text-red-400 hover:text-red-300 opacity-50 hover:opacity-100 transition-opacity">Verwijderen</button>
+                    </td>
+                  </tr>
+                  <tr *ngIf="filteredTransactions().length === 0">
+                    <td colspan="5" class="p-8 text-center text-gray-500">
+                      Geen transacties gevonden voor deze filters.
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 
-        <!-- SETTINGS / IMPORT / EXPORT VIEW -->
+        <!-- VIEW: SETTINGS -->
         <div *ngIf="activeTab() === 'settings'" class="animate-fade-in max-w-2xl mx-auto">
           <h2 class="text-2xl font-bold mb-6">Data Beheer</h2>
           
@@ -215,7 +221,7 @@ interface MonthlySummary {
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
               Data Exporteren
             </h3>
-            <p class="text-gray-400 mb-4 text-sm">Download al je transacties als een JSON bestand. Handig voor back-ups of migratie naar een database.</p>
+            <p class="text-gray-400 mb-4 text-sm">Download al je transacties als een JSON bestand. Handig voor back-ups of migratie.</p>
             <button (click)="exportData()" class="w-full bg-gray-700 hover:bg-gray-600 text-white font-medium py-2 px-4 rounded-lg transition-colors border border-gray-600">
               Download JSON Backup
             </button>
@@ -239,10 +245,11 @@ interface MonthlySummary {
 
       </main>
 
-      <!-- Modal for Add/Edit -->
+      <!-- Modal voor Toevoegen/Bewerken -->
       <div *ngIf="showModal" class="fixed inset-0 z-50 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
         <div class="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-          <div class="fixed inset-0 bg-gray-900 bg-opacity-75 transition-opacity" (click)="closeModal()"></div>
+          <!-- Achtergrond overlay -->
+          <div class="fixed inset-0 bg-gray-950 bg-opacity-80 transition-opacity" (click)="closeModal()"></div>
 
           <span class="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
 
@@ -310,7 +317,7 @@ interface MonthlySummary {
     </div>
   `,
   styles: [`
-    /* Custom Scrollbar for dark theme */
+    /* Custom Scrollbar voor donkere modus */
     ::-webkit-scrollbar {
       width: 8px;
       height: 8px;
@@ -335,7 +342,7 @@ interface MonthlySummary {
   `]
 })
 export class App {
-  // State
+  // State Signals
   activeTab = signal<'dashboard' | 'transactions' | 'settings'>('dashboard');
   transactions = signal<Transaction[]>([]);
   
@@ -351,15 +358,19 @@ export class App {
 
   constructor() {
     this.loadFromStorage();
-    // Auto-save effect
+    // Auto-save effect: Slaat data op bij elke wijziging in 'transactions'
     effect(() => {
-      localStorage.setItem('financeData', JSON.stringify(this.transactions()));
+      try {
+        localStorage.setItem('financeData', JSON.stringify(this.transactions()));
+      } catch (e) {
+        console.warn('Opslaan mislukt', e);
+      }
     });
   }
 
-  // --- Computed Signals for Logic ---
+  // --- Computed Signals voor logica ---
 
-  // 1. Filtered Transactions list
+  // 1. Gefilterde transacties
   filteredTransactions = computed(() => {
     return this.transactions()
       .filter(t => {
@@ -372,18 +383,17 @@ export class App {
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   });
 
-  // 2. Unique Categories list (sorted)
+  // 2. Unieke Categorieën
   uniqueCategories = computed(() => {
     const cats = new Set(this.transactions().map(t => t.category));
     return Array.from(cats).sort();
   });
 
-  // 3. Totals for top cards
+  // 3. Totalen voor de bovenste kaarten (Huidige Jaar)
   totalStats = computed(() => {
     const now = new Date();
     const currentYear = now.getFullYear();
     
-    // Filter for current year only for top stats, or all time? Let's do Current Year.
     const txs = this.transactions().filter(t => new Date(t.date).getFullYear() === currentYear);
     
     const income = txs.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
@@ -392,20 +402,20 @@ export class App {
     return { income, expense, balance: income - expense };
   });
 
-  // 4. Matrix / Pivot Data (Crucial for the dashboard)
+  // 4. Matrix Data voor de tabel
   matrixData = computed(() => {
     const data = this.transactions();
     const today = new Date();
     const months: string[] = [];
     
-    // Generate last 6 months keys (YYYY-MM)
+    // Genereer sleutels voor de laatste 6 maanden (YYYY-MM)
     for (let i = 5; i >= 0; i--) {
       const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
       const monthStr = d.toISOString().slice(0, 7); // "2023-10"
       months.push(monthStr);
     }
 
-    // Get categories with expenses/income in this range
+    // Welke categorieën zijn actief in deze periode?
     const activeCategories = new Set<string>();
     
     data.forEach(t => {
@@ -421,14 +431,9 @@ export class App {
     };
   });
 
-  // --- Methods ---
+  // --- Hulp Methodes ---
 
   getMatrixValue(category: string, month: string): number {
-    // Sum amounts for this category in this month
-    // Note: Expenses are positive numbers in storage, but usually displayed as logic. 
-    // For the table, let's sum expenses. If you want income too, we might need to subtract?
-    // Let's assume this matrix shows EXPENSES primarily or Net flow. 
-    // Let's do Net Flow per category.
     return this.transactions()
       .filter(t => t.category === category && t.date.startsWith(month))
       .reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
@@ -447,7 +452,7 @@ export class App {
       .reduce((sum, t) => sum + (t.type === 'income' ? t.amount : -t.amount), 0);
   }
 
-  // --- CRUD Operations ---
+  // --- Acties ---
 
   openModal(t?: Transaction) {
     if (t) {
@@ -479,6 +484,7 @@ export class App {
   }
 
   deleteTransaction(id: string) {
+    // Gebruik window.confirm (geen custom modal voor nu)
     if(confirm('Weet je zeker dat je deze transactie wilt verwijderen?')) {
       this.transactions.update(items => items.filter(t => t.id !== id));
     }
@@ -513,7 +519,7 @@ export class App {
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute("href", dataStr);
     downloadAnchorNode.setAttribute("download", "finance_backup_" + new Date().toISOString().slice(0,10) + ".json");
-    document.body.appendChild(downloadAnchorNode); // required for firefox
+    document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
   }
@@ -548,7 +554,7 @@ export class App {
     for(let i=0; i<50; i++) {
         const date = new Date(today.getFullYear(), today.getMonth() - Math.floor(Math.random() * 6), Math.floor(Math.random() * 28) + 1);
         const isIncome = Math.random() > 0.7;
-        const cat = isIncome ? 'Salaris' : categories[Math.floor(Math.random() * (categories.length - 1))]; // Skip Salaris for expense
+        const cat = isIncome ? 'Salaris' : categories[Math.floor(Math.random() * (categories.length - 1))];
         
         dummy.push({
             id: crypto.randomUUID(),
