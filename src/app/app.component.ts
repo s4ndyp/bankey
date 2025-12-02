@@ -10,6 +10,7 @@ interface Transaction {
   amount: number;
   type: 'income' | 'expense';
   category: string;
+  accountNumber?: string; // Nieuw veld
 }
 
 interface CsvMapping {
@@ -17,6 +18,7 @@ interface CsvMapping {
   descCol: number;
   amountCol: number;
   categoryCol?: number;
+  accountCol?: number; // Nieuw veld
 }
 
 type Period = '1M' | '6M' | '1Y' | 'ALL';
@@ -122,7 +124,10 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 </thead>
                 <tbody>
                   <tr *ngFor="let cat of matrixData().categories" class="border-b border-gray-700 hover:bg-gray-700/30 transition-colors">
-                    <td class="p-4 font-medium text-gray-300 sticky left-0 bg-gray-800 border-r border-gray-700">{{ cat }}</td>
+                    <td class="p-4 font-medium text-gray-300 sticky left-0 bg-gray-800 border-r border-gray-700 flex items-center gap-2">
+                      <span class="w-2 h-2 rounded-full" [style.background-color]="getCategoryColor(cat)"></span>
+                      {{ cat }}
+                    </td>
                     <td *ngFor="let m of matrixData().months" class="p-4 text-right font-mono text-gray-400">
                       <span [class.text-gray-600]="getMatrixValue(cat, m) === 0" [class.text-gray-300]="getMatrixValue(cat, m) !== 0">
                          {{ getMatrixValue(cat, m) !== 0 ? (getMatrixValue(cat, m) | currency:'EUR':'symbol':'1.0-0') : '-' }}
@@ -170,7 +175,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg lg:col-span-2">
               <h3 class="text-lg font-semibold mb-6 flex items-center gap-2">
                 <span class="w-2 h-6 bg-blue-500 rounded-full"></span>
-                Balans Verloop
+                Balans Verloop ({{ statsPeriod() === 'ALL' || statsPeriod() === '1Y' ? 'Per Maand' : (statsPeriod() === '6M' ? 'Per Week' : 'Per Dag') }})
               </h3>
               <div class="h-64 w-full relative group">
                 <!-- SVG Line Chart -->
@@ -199,36 +204,17 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     <title>{{ point.label }}: {{ point.value | currency:'EUR' }}</title>
                   </circle>
                 </svg>
-                <!-- Labels X-axis -->
+                <!-- Labels X-axis (Smart rendering to avoid overlap) -->
                 <div class="flex justify-between mt-2 text-xs text-gray-500">
                     <span *ngFor="let point of lineChartData(); let i = index">
-                       <span *ngIf="i % 2 === 0">{{ point.label }}</span>
+                       <!-- Only show every Nth label based on density -->
+                       <span *ngIf="shouldShowLabel(i, lineChartData().length)">{{ point.label }}</span>
                     </span>
                 </div>
               </div>
             </div>
 
-            <!-- 2. Uitgaven per Maand (Bar Chart) -->
-            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
-               <h3 class="text-lg font-semibold mb-6 flex items-center gap-2">
-                <span class="w-2 h-6 bg-red-500 rounded-full"></span>
-                Uitgaven per Periode
-              </h3>
-              <div class="h-64 flex items-end justify-between gap-2">
-                <div *ngFor="let item of barChartData()" class="flex-1 flex flex-col items-center group">
-                  <div class="w-full bg-gray-700 rounded-t-sm relative transition-all duration-300 hover:bg-red-500/80" 
-                       [style.height.%]="item.pct">
-                       <!-- Tooltip -->
-                       <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none transition-opacity border border-gray-600">
-                         {{ item.value | currency:'EUR':'symbol':'1.0-0' }}
-                       </div>
-                  </div>
-                  <span class="text-xs text-gray-500 mt-2 rotate-45 sm:rotate-0 origin-left truncate w-full text-center">{{ item.label }}</span>
-                </div>
-              </div>
-            </div>
-
-            <!-- 3. Uitgaven per Categorie (Pie Chart) -->
+            <!-- 2. Uitgaven per Categorie (Pie Chart) -->
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg flex flex-col">
               <h3 class="text-lg font-semibold mb-6 flex items-center gap-2">
                 <span class="w-2 h-6 bg-purple-500 rounded-full"></span>
@@ -250,6 +236,26 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     <span class="text-gray-300 flex-1">{{ item.label }}</span>
                     <span class="font-mono text-gray-400">{{ item.percentage }}%</span>
                   </div>
+                </div>
+              </div>
+            </div>
+            
+             <!-- 3. Uitgaven per Maand (Bar Chart) -->
+            <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
+               <h3 class="text-lg font-semibold mb-6 flex items-center gap-2">
+                <span class="w-2 h-6 bg-red-500 rounded-full"></span>
+                Uitgaven per Periode
+              </h3>
+              <div class="h-64 flex items-end justify-between gap-2">
+                <div *ngFor="let item of barChartData()" class="flex-1 flex flex-col items-center group">
+                  <div class="w-full bg-gray-700 rounded-t-sm relative transition-all duration-300 hover:bg-red-500/80" 
+                       [style.height.%]="item.pct">
+                       <!-- Tooltip -->
+                       <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none transition-opacity border border-gray-600">
+                         {{ item.value | currency:'EUR':'symbol':'1.0-0' }}
+                       </div>
+                  </div>
+                  <span class="text-xs text-gray-500 mt-2 rotate-45 sm:rotate-0 origin-left truncate w-full text-center">{{ item.label }}</span>
                 </div>
               </div>
             </div>
@@ -311,6 +317,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 <thead class="bg-gray-900/50 text-gray-400 border-b border-gray-700 text-sm uppercase tracking-wider">
                   <tr>
                     <th class="p-4 font-semibold">Datum</th>
+                    <th class="p-4 font-semibold">Rekening</th>
                     <th class="p-4 font-semibold">Omschrijving</th>
                     <th class="p-4 font-semibold">Categorie</th>
                     <th class="p-4 font-semibold text-right">Bedrag</th>
@@ -320,9 +327,12 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 <tbody class="divide-y divide-gray-700">
                   <tr *ngFor="let t of filteredTransactions()" class="group hover:bg-gray-700/50 transition-colors">
                     <td class="p-4 text-gray-300 whitespace-nowrap font-mono text-sm">{{ t.date | date:'dd-MM-yyyy' }}</td>
+                    <td class="p-4 text-gray-400 text-sm whitespace-nowrap">{{ t.accountNumber || '-' }}</td>
                     <td class="p-4 font-medium text-white">{{ t.description }}</td>
                     <td class="p-4">
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium bg-gray-700 text-gray-300 border border-gray-600">
+                      <span class="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold text-white border border-white/10" 
+                            [style.background-color]="getCategoryColor(t.category) + '80'" 
+                            [style.border-color]="getCategoryColor(t.category)">
                         {{ t.category }}
                       </span>
                     </td>
@@ -342,7 +352,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     </td>
                   </tr>
                   <tr *ngIf="filteredTransactions().length === 0">
-                    <td colspan="5" class="p-12 text-center">
+                    <td colspan="6" class="p-12 text-center">
                        <div class="flex flex-col items-center justify-center text-gray-500">
                          <svg class="w-12 h-12 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                          <p>Geen transacties gevonden.</p>
@@ -443,6 +453,11 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                   <label class="block text-sm font-medium text-gray-400 mb-1">Omschrijving</label>
                   <input type="text" [(ngModel)]="currentTransaction.description" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" placeholder="Bijv. Albert Heijn">
                 </div>
+                
+                <div>
+                   <label class="block text-sm font-medium text-gray-400 mb-1">Rekeningnummer (Optioneel)</label>
+                   <input type="text" [(ngModel)]="currentTransaction.accountNumber" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" placeholder="NL01BANK...">
+                </div>
 
                 <div class="grid grid-cols-2 gap-4">
                   <div>
@@ -524,6 +539,13 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                    <div class="sm:col-span-2">
                       <label class="block text-sm font-medium text-blue-400 mb-1">Omschrijving Kolom</label>
                       <select [(ngModel)]="csvMapping.descCol" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white">
+                         <option *ngFor="let h of csvPreviewHeaders; let i = index" [value]="i">{{h}} (Col {{i+1}})</option>
+                      </select>
+                   </div>
+                   <div class="sm:col-span-2">
+                      <label class="block text-sm font-medium text-blue-400 mb-1">Rekeningnummer (Optioneel)</label>
+                      <select [(ngModel)]="csvMapping.accountCol" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white">
+                         <option [ngValue]="undefined">Niet importeren</option>
                          <option *ngFor="let h of csvPreviewHeaders; let i = index" [value]="i">{{h}} (Col {{i+1}})</option>
                       </select>
                    </div>
@@ -630,19 +652,50 @@ export class App {
   csvRawData: string[][] = [];
   csvPreviewHeaders: string[] = [];
   csvPreviewRow: string[] = [];
-  csvMapping: CsvMapping = { dateCol: 0, descCol: 1, amountCol: 2 };
+  csvMapping: CsvMapping = { dateCol: 0, descCol: 1, amountCol: 2, accountCol: undefined };
 
   // Bulk Edit State
   showBulkEditModal = false;
   bulkEditCategory = '';
   bulkEditCustomCategory = '';
-  bulkEditDescription = ''; // NEW
+  bulkEditDescription = '';
 
   constructor() {
     this.loadFromStorage();
     effect(() => {
       try { localStorage.setItem('financeData', JSON.stringify(this.transactions())); } catch (e) {}
     });
+  }
+
+  // --- HELPERS FOR COLORS ---
+  
+  // Deterministic color generation based on string
+  getCategoryColor(category: string): string {
+    if (!category) return '#6B7280'; // Gray default
+    
+    // Tailwind-like palette
+    const colors = [
+      '#EF4444', // Red 500
+      '#F59E0B', // Amber 500
+      '#10B981', // Emerald 500
+      '#3B82F6', // Blue 500
+      '#6366F1', // Indigo 500
+      '#8B5CF6', // Violet 500
+      '#EC4899', // Pink 500
+      '#14B8A6', // Teal 500
+      '#F97316', // Orange 500
+      '#06B6D4', // Cyan 500
+      '#A855F7', // Purple 500
+      '#FB7185', // Rose 400
+    ];
+
+    let hash = 0;
+    for (let i = 0; i < category.length; i++) {
+      hash = category.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    
+    const index = Math.abs(hash) % colors.length;
+    return colors[index];
   }
 
   // --- COMPUTES ---
@@ -741,33 +794,63 @@ export class App {
     return data.map(d => ({ ...d, pct: (d.value / max) * 100 }));
   });
 
+  // Updated Line Chart Data with smart grouping
   lineChartData = computed(() => {
     const txs = this.statsFilteredData();
     const sortedTxs = [...txs].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const period = this.statsPeriod();
     
-    const points: {x: number, y: number, label: string, value: number}[] = [];
-    const groupedByDay = new Map<string, number>();
+    // 1. Determine grouping key
+    const getGroupKey = (dateStr: string) => {
+      if (period === '1M') return dateStr; // Day by Day
+      if (period === '1Y' || period === 'ALL') return dateStr.slice(0, 7); // YYYY-MM
+      
+      // Weekly for 6M
+      const d = new Date(dateStr);
+      d.setHours(0,0,0,0);
+      d.setDate(d.getDate() + 4 - (d.getDay() || 7)); // Nearest Thu
+      const yearStart = new Date(d.getFullYear(),0,1);
+      const weekNo = Math.ceil(( ( (d.getTime() - yearStart.getTime()) / 86400000) + 1)/7);
+      return `${d.getFullYear()}-W${weekNo}`;
+    };
+
+    // 2. Calculate Cumulative Balance History
+    // We need to process ALL transactions up to the current sorted set to get starting balance
+    // For simplicity, we start at 0 relative to the period start or just show change.
+    // Let's show cumulative change within period to be safe.
     
+    const buckets = new Map<string, number>(); 
+    let cumulative = 0;
+    
+    // Initialize buckets based on date? No, just iterate transactions.
     sortedTxs.forEach(t => {
-        const d = t.date;
-        const change = t.type === 'income' ? t.amount : -t.amount;
-        groupedByDay.set(d, (groupedByDay.get(d) || 0) + change);
+      const change = t.type === 'income' ? t.amount : -t.amount;
+      cumulative += change;
+      
+      const key = getGroupKey(t.date);
+      // We overwrite the bucket with the LATEST cumulative value for that period
+      buckets.set(key, cumulative);
     });
 
-    let cumulative = 0;
-    const days = Array.from(groupedByDay.keys()).sort();
-    
-    if (days.length === 0) return [];
+    // 3. Convert to points
+    const points: {x: number, y: number, label: string, value: number}[] = [];
+    const keys = Array.from(buckets.keys()); // These are already roughly sorted by time if transactions were sorted
 
-    days.forEach((day, index) => {
-        cumulative += groupedByDay.get(day)!;
+    keys.forEach((key, index) => {
+        let label = key;
+        if (key.includes('-W')) label = key.split('-')[1]; // W34
+        else if (key.length === 10) label = key.slice(5); // MM-DD
+        else if (key.length === 7) label = key.slice(5); // MM
+
         points.push({
             x: 0, 
             y: 0, 
-            label: day.slice(5), 
-            value: cumulative
+            label: label, 
+            value: buckets.get(key)!
         });
     });
+
+    if (points.length === 0) return [];
 
     const minVal = Math.min(0, ...points.map(p => p.value));
     const maxVal = Math.max(0, ...points.map(p => p.value));
@@ -784,6 +867,7 @@ export class App {
       return this.lineChartData().map(p => `${p.x},${p.y}`).join(' ');
   });
 
+  // Updated Pie Chart using consistent colors
   pieChartData = computed(() => {
     const txs = this.statsFilteredData().filter(t => t.type === 'expense');
     const totals = new Map<string, number>();
@@ -794,16 +878,13 @@ export class App {
         totalExp += t.amount;
     });
 
-    const colors = ['#EF4444', '#F59E0B', '#10B981', '#3B82F6', '#6366F1', '#8B5CF6', '#EC4899', '#64748B'];
-    let colorIdx = 0;
-
     return Array.from(totals.entries())
       .sort((a, b) => b[1] - a[1]) 
       .map(([cat, val]) => ({
           label: cat,
           value: val,
           percentage: totalExp ? Math.round((val / totalExp) * 100) : 0,
-          color: colors[colorIdx++ % colors.length]
+          color: this.getCategoryColor(cat) // Consistent color!
       }));
   });
   
@@ -828,6 +909,13 @@ export class App {
   }
 
   // --- ACTIONS ---
+
+  shouldShowLabel(index: number, total: number): boolean {
+    if (total <= 10) return true;
+    if (total <= 20) return index % 2 === 0;
+    if (total <= 50) return index % 5 === 0;
+    return index % 10 === 0;
+  }
 
   // Helper for safe UUID (works in non-secure contexts)
   generateUUID() {
@@ -912,7 +1000,7 @@ export class App {
   }
 
   processCsvImport() {
-      const { dateCol, descCol, amountCol } = this.csvMapping;
+      const { dateCol, descCol, amountCol, accountCol } = this.csvMapping;
       const dataRows = this.csvRawData.slice(1); 
       const newTxs: Transaction[] = [];
       let skipped = 0;
@@ -959,6 +1047,7 @@ export class App {
               }
 
               const type = amount >= 0 ? 'income' : 'expense';
+              const acc = accountCol !== undefined ? row[accountCol] : undefined;
 
               newTxs.push({
                   id: this.generateUUID(), // Using Safe UUID
@@ -966,7 +1055,8 @@ export class App {
                   description: row[descCol],
                   amount: Math.abs(amount),
                   type: type,
-                  category: 'Onbekend' 
+                  category: 'Onbekend',
+                  accountNumber: acc
               });
           } catch (e) {
               console.error(`Row ${index} error:`, e);
@@ -1059,7 +1149,8 @@ export class App {
             description: isIncome ? 'Werkgever BV' : `Betaling aan ${cat}`,
             amount: isIncome ? 2500 + Math.floor(Math.random() * 500) : 5 + Math.floor(Math.random() * 200),
             type: isIncome ? 'income' : 'expense',
-            category: cat
+            category: cat,
+            accountNumber: `NL${Math.floor(Math.random()*99)}BANK0${Math.floor(Math.random()*999999999)}`
         });
     }
     this.transactions.set(dummy);
