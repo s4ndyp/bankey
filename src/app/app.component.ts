@@ -23,6 +23,10 @@ interface CsvMapping {
   balanceCol?: number; // Nieuw veld voor import
 }
 
+interface CsvMappingTemplate extends CsvMapping {
+  name: string;
+}
+
 type Period = '1M' | '6M' | '1Y' | 'ALL';
 
 @Component({
@@ -548,6 +552,29 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
              </div>
              
              <div class="p-6 space-y-6">
+                <!-- Template Selection & Save -->
+                <div class="bg-gray-700/50 p-4 rounded-lg border border-gray-700 space-y-3">
+                    <h4 class="text-sm font-semibold text-gray-300">Mapping Template</h4>
+                    <div class="grid grid-cols-2 gap-3">
+                        <!-- Load Template -->
+                        <select 
+                            [ngModel]="selectedTemplateName" 
+                            (ngModelChange)="loadMappingTemplate($event)"
+                            class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm appearance-none cursor-pointer">
+                            <option value="">Selecteer Template...</option>
+                            <option *ngFor="let template of mappingTemplates()" [value]="template.name">{{ template.name }}</option>
+                        </select>
+                        
+                        <!-- Save Template -->
+                        <div class="flex gap-2">
+                           <input type="text" [(ngModel)]="newTemplateName" placeholder="Naam voor nieuwe template" class="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm">
+                           <button (click)="saveMappingTemplate()" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg text-sm transition-colors flex-shrink-0" title="Template opslaan">
+                               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-3m-1-4l-8.4-8.4-5 5 8.4 8.4 5-5zM9 8h.01"></path></svg>
+                           </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Preview Table -->
                 <div class="overflow-x-auto border border-gray-700 rounded-lg mb-6">
                    <table class="w-full text-xs text-left text-gray-400">
@@ -680,6 +707,7 @@ export class App {
 
   // Data
   transactions = signal<Transaction[]>([]);
+  mappingTemplates = signal<CsvMappingTemplate[]>([]); // NEW: Templates
   
   // Dashboard Navigation State (new)
   dashboardMonthOffset = signal(0);
@@ -705,6 +733,8 @@ export class App {
   csvPreviewHeaders: string[] = [];
   csvPreviewRow: string[] = [];
   csvMapping: CsvMapping = { dateCol: 0, descCol: 1, amountCol: 2, accountCol: undefined, balanceCol: undefined };
+  selectedTemplateName: string = ''; // For selection dropdown
+  newTemplateName: string = ''; // For saving new template
 
   // Bulk Edit State
   showBulkEditModal = false;
@@ -714,11 +744,75 @@ export class App {
 
   constructor() {
     this.loadFromStorage();
+    this.loadMappingTemplates(); // Load templates on startup
+    
+    // Save data on change
     effect(() => {
       try { localStorage.setItem('financeData', JSON.stringify(this.transactions())); } catch (e) {}
     });
+    // Save templates on change
+    effect(() => {
+        try { localStorage.setItem('financeMappingTemplates', JSON.stringify(this.mappingTemplates())); } catch (e) {}
+    });
   }
 
+  // --- TEMPLATE LOGIC ---
+
+  loadMappingTemplates() {
+    try {
+      const templates = localStorage.getItem('financeMappingTemplates');
+      if (templates) {
+        this.mappingTemplates.set(JSON.parse(templates));
+      }
+    } catch (e) {
+      console.error('Fout bij laden templates:', e);
+    }
+  }
+
+  loadMappingTemplate(name: string) {
+    if (!name) return;
+    const template = this.mappingTemplates().find(t => t.name === name);
+    if (template) {
+      this.csvMapping = {
+        dateCol: template.dateCol,
+        descCol: template.descCol,
+        amountCol: template.amountCol,
+        categoryCol: template.categoryCol,
+        accountCol: template.accountCol,
+        balanceCol: template.balanceCol,
+      };
+      this.selectedTemplateName = name;
+      alert(`Template "${name}" geladen.`);
+    }
+  }
+
+  saveMappingTemplate() {
+    const name = this.newTemplateName.trim();
+    if (!name) {
+      alert("Geef de template een naam.");
+      return;
+    }
+
+    const newTemplate: CsvMappingTemplate = {
+      name: name,
+      ...this.csvMapping
+    };
+
+    this.mappingTemplates.update(templates => {
+      const index = templates.findIndex(t => t.name === name);
+      if (index !== -1) {
+        templates[index] = newTemplate; // Overschrijf bestaande
+      } else {
+        templates.push(newTemplate); // Voeg nieuwe toe
+      }
+      return [...templates];
+    });
+
+    this.selectedTemplateName = name;
+    this.newTemplateName = '';
+    alert(`Template "${name}" is opgeslagen.`);
+  }
+  
   // --- HELPERS FOR COLORS ---
   
   // Deterministic color generation based on string
@@ -858,7 +952,7 @@ export class App {
       return Math.max(...data.map(d => (d.value / d.pct) * 100), 100);
   }
 
-  // UPDATED: Line Chart Data now prioritizes currentBalance
+  // UPDATED: Line Chart Data now ONLY uses currentBalance
   lineChartData = computed(() => {
     const txs = this.statsFilteredData();
     const sortedTxs = [...txs].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -878,53 +972,29 @@ export class App {
       return `${d.getFullYear()}-W${weekNo}`;
     };
 
-    // 2. Extract Balance or Calculate Cumulative Change
-    const buckets = new Map<string, number>(); 
-    let cumulative = 0;
-    let hasBalanceData = sortedTxs.some(t => t.currentBalance !== undefined);
-
-    sortedTxs.forEach(t => {
-        const key = getGroupKey(t.date);
-
-        if (hasBalanceData && t.currentBalance !== undefined) {
-            // Use the explicit balance field if available
-            buckets.set(key, t.currentBalance);
-        } else if (!hasBalanceData) {
-            // Fallback: Calculate cumulative change
-            const change = t.type === 'income' ? t.amount : -t.amount;
-            cumulative += change;
-            buckets.set(key, cumulative);
-        }
-        // If hasBalanceData is true but t.currentBalance is undefined, we skip this point, 
-        // assuming the balance data is sparse or incomplete.
-    });
+    // 2. Extract Balance (Must have currentBalance)
+    const pointsMap = new Map<string, { label: string, value: number }>();
     
-    // 3. Convert to points
-    const points: {x: number, y: number, label: string, value: number}[] = [];
-    const keys = Array.from(buckets.keys()); 
+    sortedTxs.forEach(t => {
+        if (t.currentBalance !== undefined) {
+            const key = getGroupKey(t.date);
+            let label = key;
+            if (key.includes('-W')) label = key.split('-')[1]; 
+            else if (key.length === 10) label = key.slice(5); 
+            else if (key.length === 7) label = key.slice(5); 
 
-    keys.forEach((key) => {
-        let label = key;
-        if (key.includes('-W')) label = key.split('-')[1]; 
-        else if (key.length === 10) label = key.slice(5); 
-        else if (key.length === 7) label = key.slice(5); 
-
-        points.push({
-            x: 0, 
-            y: 0, 
-            label: label, 
-            value: buckets.get(key)!
-        });
+            // Overwrite, only keep the latest balance for the key
+            pointsMap.set(key, { label: label, value: t.currentBalance });
+        }
     });
 
+    // 3. Convert to points array and ensure chronological order
+    const points = Array.from(pointsMap.entries())
+      .map(([key, data]) => ({ key, ...data }))
+      .sort((a, b) => a.key.localeCompare(b.key));
+      
     if (points.length === 0) return [];
     
-    // Sort points by date (key) to ensure they are chronological
-    points.sort((a, b) => {
-        // Simple comparison of keys (YYYY-MM-DD or YYYY-WXX) works for chronology
-        return a.label.localeCompare(b.label);
-    });
-
     const minVal = Math.min(0, ...points.map(p => p.value));
     const maxVal = Math.max(0, ...points.map(p => p.value));
     const range = maxVal - minVal || 1;
@@ -1272,8 +1342,8 @@ export class App {
     const a = document.createElement('a'); a.href = dataStr; a.download = "backup.json"; document.body.appendChild(a); a.click(); a.remove();
   }
   importJson(e: any) {
-      f = e.target.files[0]; if(!f) return;
-      r = new FileReader(); r.onload = (ev: any) => { this.transactions.set(JSON.parse(ev.target.result)); alert('Hersteld!'); }; r.readAsText(f);
+      const f = e.target.files[0]; if(!f) return;
+      const r = new FileReader(); r.onload = (ev: any) => { this.transactions.set(JSON.parse(ev.target.result)); alert('Hersteld!'); }; r.readAsText(f);
   }
   loadDummyData() {
     const cats = ['Boodschappen', 'Huur', 'Salaris', 'Verzekering', 'Uit eten', 'Vervoer', 'Abonnementen', 'Kleding'];
