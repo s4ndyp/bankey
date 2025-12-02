@@ -114,7 +114,6 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 <thead>
                   <tr class="bg-gray-900/50 text-gray-400 border-b border-gray-700">
                     <th class="p-4 font-medium sticky left-0 bg-gray-900 z-10 border-r border-gray-700">Categorie</th>
-                    <!-- Months are generated reverse chronologically in matrixData logic -->
                     <th *ngFor="let m of matrixData().months" class="p-4 font-medium text-right min-w-[100px]">
                       {{ m | date:'MMM yy' }}
                     </th>
@@ -557,16 +556,23 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                 <span class="italic">"{{ searchTerm() || 'Alles' }}"</span>
              </div>
 
-             <div class="mb-6">
-                <label class="block text-sm font-medium text-gray-400 mb-1">Nieuwe Categorie</label>
-                <!-- FIXED: Dropdown for Bulk Edit -->
-                <select [(ngModel)]="bulkEditCategory" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 appearance-none">
-                  <option value="" disabled selected>Kies een categorie...</option>
-                  <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
-                  <option value="NEW">+ Nieuwe Categorie (Typ in lijst)</option>
-                </select>
-                <!-- Fallback input if they select NEW or want to type -->
-                <input *ngIf="bulkEditCategory === 'NEW'" type="text" [(ngModel)]="bulkEditCustomCategory" placeholder="Typ nieuwe categorie..." class="mt-2 w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500">
+             <div class="space-y-4 mb-6">
+                <!-- Categorie Bewerken -->
+                <div>
+                  <label class="block text-sm font-medium text-gray-400 mb-1">Nieuwe Categorie</label>
+                  <select [(ngModel)]="bulkEditCategory" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500 appearance-none">
+                    <option value="" disabled selected>Kies een categorie (optioneel)...</option>
+                    <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
+                    <option value="NEW">+ Nieuwe Categorie (Typ in lijst)</option>
+                  </select>
+                  <input *ngIf="bulkEditCategory === 'NEW'" type="text" [(ngModel)]="bulkEditCustomCategory" placeholder="Typ nieuwe categorie..." class="mt-2 w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <!-- Omschrijving Bewerken -->
+                <div>
+                   <label class="block text-sm font-medium text-gray-400 mb-1">Nieuwe Omschrijving</label>
+                   <input type="text" [(ngModel)]="bulkEditDescription" placeholder="Typ nieuwe omschrijving (optioneel)..." class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500">
+                </div>
              </div>
 
              <div class="flex justify-end gap-2">
@@ -630,6 +636,7 @@ export class App {
   showBulkEditModal = false;
   bulkEditCategory = '';
   bulkEditCustomCategory = '';
+  bulkEditDescription = ''; // NEW
 
   constructor() {
     this.loadFromStorage();
@@ -822,6 +829,18 @@ export class App {
 
   // --- ACTIONS ---
 
+  // Helper for safe UUID (works in non-secure contexts)
+  generateUUID() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    // Fallback for older browsers or insecure contexts (HTTP)
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
   // Dashboard Nav
   moveDashboard(delta: number) {
     this.dashboardMonthOffset.update(v => v + delta);
@@ -831,6 +850,7 @@ export class App {
   openBulkEdit() {
       this.bulkEditCategory = '';
       this.bulkEditCustomCategory = '';
+      this.bulkEditDescription = '';
       this.showBulkEditModal = true;
   }
   
@@ -840,15 +860,24 @@ export class App {
       if (finalCat === 'NEW') {
         finalCat = this.bulkEditCustomCategory;
       }
+      
+      const newDesc = this.bulkEditDescription;
 
-      if (!finalCat) return;
+      // Ensure at least one field is filled
+      if (!finalCat && !newDesc) {
+        alert("Vul een categorie of omschrijving in om te wijzigen.");
+        return;
+      }
 
       const filteredIds = this.filteredTransactions().map(t => t.id);
       
       this.transactions.update(current => 
          current.map(t => {
              if (filteredIds.includes(t.id)) {
-                 return { ...t, category: finalCat };
+                 const updated = { ...t };
+                 if (finalCat) updated.category = finalCat;
+                 if (newDesc) updated.description = newDesc;
+                 return updated;
              }
              return t;
          })
@@ -932,7 +961,7 @@ export class App {
               const type = amount >= 0 ? 'income' : 'expense';
 
               newTxs.push({
-                  id: crypto.randomUUID(), // CRUCIAL for deletion
+                  id: this.generateUUID(), // Using Safe UUID
                   date: dateStr,
                   description: row[descCol],
                   amount: Math.abs(amount),
@@ -957,12 +986,22 @@ export class App {
     this.showModal = true;
   }
   closeModal() { this.showModal = false; }
+  
   saveTransaction() {
-    if (!this.currentTransaction.description || !this.currentTransaction.amount) return;
+    // Validation with Feedback
+    if (!this.currentTransaction.description) {
+      alert('Vul een omschrijving in.');
+      return;
+    }
+    if (this.currentTransaction.amount === null || this.currentTransaction.amount === undefined) {
+      alert('Vul een bedrag in.');
+      return;
+    }
+
     if (this.isEditing) {
       this.transactions.update(items => items.map(item => item.id === this.currentTransaction.id ? this.currentTransaction : item));
     } else {
-      this.currentTransaction.id = crypto.randomUUID();
+      this.currentTransaction.id = this.generateUUID(); // Safe UUID
       this.transactions.update(items => [...items, this.currentTransaction]);
     }
     this.closeModal();
@@ -1015,7 +1054,7 @@ export class App {
         const isIncome = Math.random() > 0.8;
         const cat = isIncome ? 'Salaris' : cats[Math.floor(Math.random() * (cats.length - 1))];
         dummy.push({
-            id: crypto.randomUUID(),
+            id: this.generateUUID(), // Safe UUID
             date: date.toISOString().slice(0,10),
             description: isIncome ? 'Werkgever BV' : `Betaling aan ${cat}`,
             amount: isIncome ? 2500 + Math.floor(Math.random() * 500) : 5 + Math.floor(Math.random() * 200),
