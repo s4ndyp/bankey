@@ -3,12 +3,12 @@ import { CommonModule, DatePipe, CurrencyPipe, DecimalPipe } from '@angular/comm
 import { FormsModule } from '@angular/forms';
 
 // --- Interfaces ---
-
 interface ApiConfig {
     url: string; // Bijv. 'http://andere-server:8080'
-    token: string;
-    username?: string; // Optioneel, alleen voor weergave
-    endpointName: string; // NIEUW: Naam van het unieke dashboard endpoint
+    token: string; // Het ontvangen JWT token
+    username: string; // Verplicht
+    password?: string; // Tijdelijk veld, niet persistent opgeslagen
+    endpointName: string; // Naam van het unieke dashboard endpoint
 }
 
 // OPGELOST: ConfigBase type is nu string om conflicten met Transaction['type'] op te lossen.
@@ -23,7 +23,6 @@ interface Transaction {
   date: string; // ISO format YYYY-MM-DD
   description: string;
   amount: number;
-  // OPGELOST: Type is nog steeds beperkt, maar dit is het "echte" data type.
   type: 'income' | 'expense'; 
   category: string;
   accountNumber?: string;
@@ -40,7 +39,6 @@ interface CsvMapping {
   balanceCol?: number;
 }
 
-// OPGELOST: CsvMappingTemplate erft van ConfigBase en CsvMapping
 interface CsvMappingTemplate extends CsvMapping, ConfigBase {
   name: string;
   type: 'config'; 
@@ -73,7 +71,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
 
 // --- API Service Logic ---
 class ApiService {
-    private config: ApiConfig = { url: '', token: '', endpointName: 'finance-data' };
+    private config: ApiConfig = { url: '', token: '', username: '', endpointName: 'finance-data' };
     private apiBaseUrl = ''; 
     private transactionType = 'transaction';
     private configType = 'config';
@@ -82,6 +80,39 @@ class ApiService {
         this.config = initialConfig;
         this.updateBaseUrl(); 
     }
+    
+    // NIEUW: Functie om in te loggen en het JWT token op te halen
+    async login(url: string, username: string, password?: string): Promise<string> {
+        if (!password) {
+            throw new Error('Wachtwoord is verplicht om in te loggen.');
+        }
+        
+        const loginUrl = `${url}/login/auth`;
+        
+        // --- API CALL ---
+        const headers = { 'Content-Type': 'application/json' };
+        const options: RequestInit = {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ username, password }),
+            mode: 'cors'
+        };
+
+        const response = await fetch(loginUrl, options);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Aanmelden Mislukt (${response.status}): ${errorText.substring(0, 150)}`);
+        }
+
+        const result = await response.json();
+        if (!result.token) {
+            throw new Error('Aanmelden Mislukt: Geen token ontvangen.');
+        }
+        
+        return result.token;
+    }
+
 
     private updateBaseUrl() {
         if (this.config.url && this.config.endpointName) {
@@ -94,7 +125,14 @@ class ApiService {
     public updateConfig(newConfig: ApiConfig) {
         this.config = newConfig;
         this.updateBaseUrl();
-        localStorage.setItem('apiConfig', JSON.stringify(newConfig));
+        // Sla alleen de benodigde velden op (niet het wachtwoord!)
+        const configToStore = {
+            url: newConfig.url,
+            token: newConfig.token,
+            username: newConfig.username,
+            endpointName: newConfig.endpointName
+        };
+        localStorage.setItem('apiConfig', JSON.stringify(configToStore));
     }
     
     public getConfig(): ApiConfig {
@@ -102,6 +140,7 @@ class ApiService {
     }
 
     private async callApi(url: string, method: string, data: any = null): Promise<any> {
+        // GEWIJZIGD: Controleer of token bestaat, niet of het lang genoeg is (de login regelt dit)
         if (!this.config.url || !this.config.token || !this.apiBaseUrl) {
             throw new Error('API URL, Endpoint Naam, of Token is niet ingesteld.');
         }
@@ -161,7 +200,6 @@ class ApiService {
         return result.map(item => ({...item.data, id: item.id}));
     }
 
-    // T moet minstens { id: string } hebben (als we updaten), of gewoon de data bevatten (als we adden)
     async addItem<T>(item: T): Promise<T> {
         const dataToSend = { ...item };
         if ((dataToSend as any).id) delete (dataToSend as any).id;
@@ -170,7 +208,6 @@ class ApiService {
         return { ...result.data, id: result.id };
     }
 
-    // T moet de id bevatten
     async updateItem<T extends { id: string }>(item: T): Promise<T> {
         const id = item.id;
         const url = `${this.apiBaseUrl}/${id}`;
@@ -236,7 +273,7 @@ class ApiService {
         <!-- === API CONNECTION SETUP VIEW === -->
         <div *ngIf="!apiConfig().token && activeTab() !== 'settings'" class="p-8 bg-yellow-900/50 border border-yellow-700 rounded-xl shadow-xl text-center mb-8">
             <h3 class="text-2xl font-bold text-yellow-300 mb-2">API Verbinding Vereist</h3>
-            <p class="text-yellow-400 mb-4">Om de applicatie te gebruiken, moet je eerst de URL, **Endpoint Naam** en JWT-token van de API Gateway instellen op het tabblad "Beheer".</p>
+            <p class="text-yellow-400 mb-4">Om de applicatie te gebruiken, moet je eerst de URL, **Endpoint Naam**, **Gebruikersnaam** en **Wachtwoord** instellen op het tabblad "Beheer".</p>
             <button (click)="activeTab.set('settings')" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-medium transition-colors">
               Ga naar Instellingen
             </button>
@@ -803,17 +840,24 @@ class ApiService {
                 <label class="block text-sm font-medium text-gray-400 mb-1">Unieke Endpoint Naam (aangemaakt in dashboard)</label>
                 <input type="text" [(ngModel)]="newApiConfig.endpointName" placeholder="bv. finance-app-v1" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
               </div>
+              <!-- GEWIJZIGD: Invoer voor Gebruikersnaam -->
               <div>
-                <label class="block text-sm font-medium text-gray-400 mb-1">Gebruikersnaam (voor weergave)</label>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Gebruikersnaam</label>
                 <input type="text" [(ngModel)]="newApiConfig.username" placeholder="Gebruikersnaam" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
               </div>
+              <!-- NIEUW: Invoer voor Wachtwoord (voor Login) -->
               <div>
-                <label class="block text-sm font-medium text-gray-400 mb-1">JWT Token (Bearer)</label>
-                <textarea [(ngModel)]="newApiConfig.token" placeholder="Plak hier het lange JWT-token..." rows="3" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm resize-none"></textarea>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Wachtwoord</label>
+                <input type="password" [(ngModel)]="newApiConfig.password" placeholder="Wachtwoord" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
+              </div>
+              
+              <div *ngIf="apiConfig().token" class="text-sm text-gray-500 p-2 border border-gray-700 rounded-lg break-all">
+                  <span class="text-green-400 font-bold">Token verkregen.</span> Verlooptijd van Token wordt beheerd door de API.
               </div>
             </div>
+            
             <button (click)="saveApiConfig()" class="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-lg font-medium transition-colors w-full">
-              Opslaan & Data Synchroniseren
+              Inloggen & Data Synchroniseren
             </button>
             <div *ngIf="apiConfig().token" class="text-sm text-green-400 mt-2 text-center">
                 Verbonden: Transacties worden nu opgeslagen via de API.
@@ -1153,8 +1197,9 @@ export class App {
   // --- SERVICE & CONFIGURATION ---
   private apiService: ApiService;
   
+  // GEWIJZIGD: Tijdelijke configuratie bevat nu het wachtwoord.
   apiConfig = signal<ApiConfig>(this.loadApiConfig());
-  newApiConfig: ApiConfig = this.loadApiConfig();
+  newApiConfig: ApiConfig = this.loadApiConfig(); // Temp state voor de form
   isLoading = signal(false);
   loadingMessage = signal('Initialiseren...');
 
@@ -1225,7 +1270,8 @@ export class App {
   // --- DATA LOADING & API WRAPPERS ---
   
   loadApiConfig(): ApiConfig {
-      const defaultConfig: ApiConfig = { url: '', token: '', username: 'Onbekend', endpointName: 'finance' };
+      // GEWIJZIGD: username is nu verplicht in de API Config interface
+      const defaultConfig: ApiConfig = { url: '', token: '', username: '', endpointName: 'finance', password: '' };
       try {
           const configStr = localStorage.getItem('apiConfig');
           if (configStr) {
@@ -1233,8 +1279,9 @@ export class App {
               return { 
                   url: config.url || '', 
                   token: config.token || '', 
-                  username: config.username || 'Onbekend',
-                  endpointName: config.endpointName || defaultConfig.endpointName
+                  username: config.username || '', // Zorg dat username geladen wordt
+                  endpointName: config.endpointName || defaultConfig.endpointName,
+                  password: '' // Wachtwoord wordt nooit opgeslagen, dus is leeg bij laden
               };
           }
       } catch (e) {
@@ -1244,20 +1291,52 @@ export class App {
   }
   
   async saveApiConfig() {
-    if (!this.newApiConfig.url || !this.newApiConfig.token || !this.newApiConfig.endpointName) {
-        alert("Vul de API URL, Endpoint Naam en JWT Token in.");
+    // 1. Validatie
+    if (!this.newApiConfig.url || !this.newApiConfig.endpointName || !this.newApiConfig.username || !this.newApiConfig.password) {
+        alert("Vul API URL, Endpoint Naam, Gebruikersnaam én Wachtwoord in.");
         return;
     }
-    this.apiService.updateConfig(this.newApiConfig);
-    this.apiConfig.set(this.newApiConfig);
+    
+    this.isLoading.set(true);
+    this.loadingMessage.set('Bezig met aanmelden...');
+    
     try {
+        // 2. Login om token op te halen
+        const newToken = await this.apiService.login(
+            this.newApiConfig.url, 
+            this.newApiConfig.username, 
+            this.newApiConfig.password
+        );
+        
+        // 3. Update de configuratie met het ontvangen token
+        const configToSave: ApiConfig = {
+            url: this.newApiConfig.url,
+            token: newToken, // HET BELANGRIJKE VELD: het opgehaalde token
+            username: this.newApiConfig.username,
+            endpointName: this.newApiConfig.endpointName
+            // password wordt hier NIET opgeslagen
+        };
+        
+        this.apiService.updateConfig(configToSave);
+        this.apiConfig.set(configToSave);
+        
+        // Leeg het wachtwoord veld voor de veiligheid, want het is nu in het token verwerkt
+        this.newApiConfig.password = ''; 
+
+        // 4. Laad data met de nieuwe configuratie
         await this.loadAllData(true);
         alert("API configuratie opgeslagen en synchronisatie gestart.");
+        
     } catch (e) {
+        console.error('Login fout:', e);
         const message = e instanceof Error ? e.message : String(e);
-        alert(`Fout bij opslaan en synchroniseren: ${message}`);
+        alert(`Fout bij aanmelden of opslaan: ${message}`);
+        this.apiConfig.update(c => ({...c, token: ''})); // Zorg dat token leeg is bij fout
+    } finally {
+        this.isLoading.set(false);
     }
-  }
+}
+
 
   async loadAllData(forceReload = false) {
       if (!this.apiConfig().token || !this.apiConfig().endpointName) return;
@@ -1284,14 +1363,13 @@ export class App {
       } catch (e) {
         console.error('Fout bij het laden van data:', e);
         const message = e instanceof Error ? e.message : String(e);
-        alert(`Fout bij het synchroniseren met de API: ${message}. Controleer uw URL, Endpoint Naam en Token.`);
+        alert(`Fout bij het synchroniseren met de API: ${message}. Controleer uw URL, Endpoint Naam en of uw Token nog geldig is.`);
         this.apiConfig.update(c => ({...c, token: ''}));
       } finally {
         this.isLoading.set(false);
       }
   }
   
-  // OPGELOST: Type T kan nu elke structuur zijn die id en type bevat.
   async saveItem<T extends { id: string, type: string }>(item: T): Promise<T> {
       if (!this.apiConfig().token) throw new Error("API not configured");
       
@@ -1538,7 +1616,6 @@ export class App {
 
       try {
           await Promise.all(transactionsToUpdate.map(t => 
-              // We voegen het 'type' toe voor de API.
               this.apiService.updateItem(t) 
           ));
           alert(`Regel succesvol toegepast: ${count} bestaande transacties bijgewerkt.`);
@@ -1992,7 +2069,6 @@ export class App {
 
       try {
           await Promise.all(transactionsToUpdate.map(t => 
-              // OPGELOST: T is nu type Transaction, wat { id: string } bevat.
               this.apiService.updateItem(t) 
           ));
           alert(`${transactionsToUpdate.length} transacties succesvol bijgewerkt in de API.`);
@@ -2126,10 +2202,8 @@ export class App {
       const newTxsWithApiIds: Transaction[] = [];
       try {
           for (const tx of newTxs) {
-              // OPGELOST: Verwijder de dubbele property in de object literal. 
-              // We voegen nu de 'type' marker toe aan het transactie object.
               const txWithApiType = { ...tx, type: 'transaction' as const };
-              const savedTx = await this.apiService.addItem(txWithApiType as any); // Cast naar any om de type check te omzeilen, dit is een API marker
+              const savedTx = await this.apiService.addItem(txWithApiType as any);
               newTxsWithApiIds.push(savedTx as Transaction);
           }
           
@@ -2238,7 +2312,6 @@ export class App {
         this.addManualCategoryFromModal(this.currentTransaction.category);
     }
     
-    // OPGELOST: Voeg type='transaction' toe om de API te laten weten dat dit een transactie is.
     const finalTx = { ...this.currentTransaction, type: 'transaction' as const };
     const oldTx = this.isEditing ? this.transactions().find(t => t.id === finalTx.id) : null;
     
@@ -2246,12 +2319,9 @@ export class App {
     this.loadingMessage.set('Transactie opslaan...');
 
     try {
-        // OPGELOST: Cast naar any om TS2339/TS2322 (never) op te lossen. Dit object bevat alle velden van Transaction
-        // plus de type marker, wat voldoet aan de eisen van saveItem.
         const savedTx = await this.saveItem(finalTx as any);
         
         if (this.isEditing) {
-            // OPGELOST: savedTx wordt gecast naar Transaction, wat veilig is omdat de API een Transaction teruggeeft.
             this.transactions.update(items => items.map(item => item.id === savedTx.id ? savedTx as Transaction : item));
         } else {
             this.transactions.update(items => [...items, savedTx as Transaction]);
@@ -2305,7 +2375,6 @@ export class App {
         if (txToDelete) {
              this.transactions.update(items => [...items, txToDelete]);
         }
-        // OPGELOST: Cast e naar Error om bij message te komen
         const message = e instanceof Error ? e.message : String(e);
         alert(`Fout bij verwijderen van transactie: ${message}`);
     } finally {
@@ -2358,7 +2427,6 @@ export class App {
                   this.apiService.deleteBulk('config')
               ]).then(() => {
                  return Promise.all(importedTxs.map(tx => {
-                     // OPGELOST: Voeg 'type' marker correct toe
                      const txWithApiType = { ...tx, type: 'transaction' as const };
                      tx.id = this.generateUUID(); 
                      return this.apiService.addItem(txWithApiType as any);
@@ -2436,7 +2504,6 @@ export class App {
         ]);
 
         await Promise.all([
-            // OPGELOST: Voeg type marker toe en cast naar any om type checks te passeren
             ...dummyTxs.map(tx => this.apiService.addItem({ ...tx, type: 'transaction' as const } as any)), 
             ...dummyRules.map(rule => this.apiService.addItem(rule)),
             this.apiService.addItem(dummyAccountNames),
