@@ -10,7 +10,7 @@ interface Transaction {
   amount: number;
   type: 'income' | 'expense';
   category: string;
-  accountNumber?: string; // Nieuw veld
+  accountNumber?: string;
 }
 
 interface CsvMapping {
@@ -18,7 +18,7 @@ interface CsvMapping {
   descCol: number;
   amountCol: number;
   categoryCol?: number;
-  accountCol?: number; // Nieuw veld
+  accountCol?: number;
 }
 
 type Period = '1M' | '6M' | '1Y' | 'ALL';
@@ -240,22 +240,26 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
               </div>
             </div>
             
-             <!-- 3. Uitgaven per Maand (Bar Chart) -->
+             <!-- 3. Uitgaven per Categorie (Bar Chart - NEW) -->
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
                <h3 class="text-lg font-semibold mb-6 flex items-center gap-2">
                 <span class="w-2 h-6 bg-red-500 rounded-full"></span>
-                Uitgaven per Periode
+                Uitgaven per Categorie (Top)
               </h3>
               <div class="h-64 flex items-end justify-between gap-2">
                 <div *ngFor="let item of barChartData()" class="flex-1 flex flex-col items-center group">
-                  <div class="w-full bg-gray-700 rounded-t-sm relative transition-all duration-300 hover:bg-red-500/80" 
-                       [style.height.%]="item.pct">
+                  <div class="w-full rounded-t-sm relative transition-all duration-300 hover:opacity-80" 
+                       [style.height.%]="item.pct"
+                       [style.background-color]="item.color">
                        <!-- Tooltip -->
                        <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none transition-opacity border border-gray-600">
-                         {{ item.value | currency:'EUR':'symbol':'1.0-0' }}
+                         {{ item.label }}: {{ item.value | currency:'EUR':'symbol':'1.0-0' }}
                        </div>
                   </div>
-                  <span class="text-xs text-gray-500 mt-2 rotate-45 sm:rotate-0 origin-left truncate w-full text-center">{{ item.label }}</span>
+                  <!-- Rotating labels for readability -->
+                  <span class="text-xs text-gray-500 mt-2 rotate-45 sm:rotate-0 origin-left truncate w-full text-center" [title]="item.label">
+                    {{ item.label.length > 8 ? item.label.slice(0,6) + '..' : item.label }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -772,26 +776,29 @@ export class App {
     return all.filter(t => new Date(t.date) >= cutoff);
   });
 
+  // CHANGED: Bar chart is now Category based
   barChartData = computed(() => {
-    const txs = this.statsFilteredData();
+    const txs = this.statsFilteredData().filter(t => t.type === 'expense');
     const buckets = new Map<string, number>(); 
     
     txs.forEach(t => {
-      if (t.type === 'expense') {
-        const key = t.date.slice(0, 7);
-        buckets.set(key, (buckets.get(key) || 0) + t.amount);
-      }
+       buckets.set(t.category, (buckets.get(t.category) || 0) + t.amount);
     });
 
-    const sortedKeys = Array.from(buckets.keys()).sort();
-    const data = sortedKeys.map(key => ({
-       label: key.slice(5), 
-       fullLabel: key,
-       value: buckets.get(key) || 0
+    const data = Array.from(buckets.entries()).map(([cat, val]) => ({
+       label: cat,
+       value: val,
+       color: this.getCategoryColor(cat) // Consistent color
     }));
 
-    const max = Math.max(...data.map(d => d.value), 1);
-    return data.map(d => ({ ...d, pct: (d.value / max) * 100 }));
+    // Sort descending by value
+    data.sort((a,b) => b.value - a.value);
+
+    // Take top 8 only to prevent clutter
+    const topData = data.slice(0, 8);
+
+    const max = Math.max(...topData.map(d => d.value), 1);
+    return topData.map(d => ({ ...d, pct: (d.value / max) * 100 }));
   });
 
   // Updated Line Chart Data with smart grouping
@@ -1012,9 +1019,42 @@ export class App {
           }
 
           try {
-              let amountStr = row[amountCol];
-              amountStr = amountStr.replace(/\./g, '').replace(',', '.');
-              let amount = parseFloat(amountStr);
+              let amountStr = row[amountCol].trim();
+              
+              // Smart Parsing for Amounts (NL vs US)
+              let amount = 0;
+              
+              // Case 1: Contains both . and ,
+              if (amountStr.includes(',') && amountStr.includes('.')) {
+                   if (amountStr.lastIndexOf(',') > amountStr.lastIndexOf('.')) {
+                       // 1.250,50 (NL)
+                       amountStr = amountStr.replace(/\./g, '').replace(',', '.');
+                   } else {
+                       // 1,250.50 (US)
+                       amountStr = amountStr.replace(/,/g, '');
+                   }
+              } 
+              // Case 2: Only comma
+              else if (amountStr.includes(',')) {
+                   // Often Dutch decimal (10,50)
+                   amountStr = amountStr.replace(',', '.');
+              }
+              // Case 3: Only dot
+              else if (amountStr.includes('.')) {
+                   // Can be 10.50 (US decimal) or 1.000 (NL Thousand)
+                   // Heuristic: If there is more than one dot, it's definitely thousands
+                   const parts = amountStr.split('.');
+                   if (parts.length > 2) {
+                       amountStr = amountStr.replace(/\./g, '');
+                   }
+                   // If just one dot (e.g. 10.50), JS parseFloat handles it correctly as decimal.
+                   // If it was a thousand separator (1.000), JS sees 1.0. 
+                   // This is ambiguous, but most CSVs export raw numbers (1000.50) rather than formatted thousands (1.000).
+                   // The user complained about "too big", implying we STRIPPED the dot from 10.50 making it 1050.
+                   // So we do NOTHING here, letting parseFloat handle 10.50 correctly.
+              }
+
+              amount = parseFloat(amountStr);
               
               if (isNaN(amount)) { 
                 console.warn(`Row ${index} invalid amount`, row[amountCol]);
