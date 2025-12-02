@@ -157,8 +157,8 @@ class ApiService {
 
     private updateBaseUrl() {
         if (this.config.url) {
-            // Hardcoded endpoint: /api/finance
-            this.apiBaseUrl = `${this.cleanUrl(this.config.url)}/api/finance`;
+            // Gebruik cleanUrl
+            this.apiBaseUrl = `${this.cleanUrl(this.config.url)}/api/finance`; 
         } else {
             this.apiBaseUrl = '';
         }
@@ -893,9 +893,7 @@ class ApiService {
 
               <!-- NIEUW VELD: Endpoint Naam -->
               <div>
-                <label class="block text-sm font-medium text-gray-400 mb-1">Unieke Endpoint Naam (aangemaakt in dashboard)</label>
-                <input type="text" [(ngModel)]="newApiConfig.endpointName" placeholder="bv. finance-app-v1" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
-              </div>
+                              </div>
               <!-- GEWIJZIGD: Invoer voor Gebruikersnaam -->
               <div>
                 <label class="block text-sm font-medium text-gray-400 mb-1">Gebruikersnaam</label>
@@ -1340,7 +1338,6 @@ export class App {
                   url: config.url || '', 
                   token: config.token || '', 
                   username: config.username || '', // Zorg dat username geladen wordt
-                  endpointName: config.endpointName || defaultConfig.endpointName,
                   password: '' // Wachtwoord wordt nooit opgeslagen, dus is leeg bij laden
               };
           }
@@ -1352,8 +1349,8 @@ export class App {
   
   async saveApiConfig() {
     // 1. Validatie
-    if (!this.newApiConfig.url || !this.newApiConfig.endpointName || !this.newApiConfig.username || !this.newApiConfig.password) {
-        alert("Vul API URL, Endpoint Naam, Gebruikersnaam én Wachtwoord in.");
+    if (!this.newApiConfig.url || !this.newApiConfig.username || !this.newApiConfig.password) {
+        alert("Vul API URL, Gebruikersnaam én Wachtwoord in.");
         return;
     }
     
@@ -1373,7 +1370,6 @@ export class App {
             url: this.newApiConfig.url,
             token: newToken, // HET BELANGRIJKE VELD: het opgehaalde token
             username: this.newApiConfig.username,
-            endpointName: this.newApiConfig.endpointName
             // password wordt hier NIET opgeslagen
         };
         
@@ -1399,7 +1395,7 @@ export class App {
 
 
   async loadAllData(forceReload = false) {
-      if (!this.apiConfig().token || !this.apiConfig().endpointName) return;
+      if (!this.apiConfig().token ) return;
       
       this.isLoading.set(true);
       this.loadingMessage.set('Transacties en configuratie ophalen...');
@@ -2186,7 +2182,7 @@ export class App {
 
 
   handleCsvFile(event: any) {
-    if (!this.apiConfig().token || !this.apiConfig().endpointName) {
+    if (!this.apiConfig().token ) {
         alert("Stel eerst de API configuratie in op het tabblad 'Beheer'.");
         return;
     }
@@ -2328,7 +2324,7 @@ export class App {
   }
 
   openModal(t?: Transaction) {
-    if (!this.apiConfig().token || !this.apiConfig().endpointName) {
+    if (!this.apiConfig().token ) {
         alert("Stel eerst de API configuratie in op het tabblad 'Beheer'.");
         return;
     }
