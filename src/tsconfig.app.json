@@ -1,0 +1,17 @@
+{
+  // Erft de basisinstellingen van het tsconfig.json bestand in de root
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "../out-tsc/app",
+    "types": []
+  },
+  // Dit zijn de specifieke bestanden die gecompileerd moeten worden
+  "files": [
+    // Het opstartpunt van de Angular applicatie
+    "main.ts" 
+  ],
+  // Extra declaraties (zoals type definitions) die meegenomen moeten worden
+  "include": [
+    "**/*.d.ts"
+  ]
+}
