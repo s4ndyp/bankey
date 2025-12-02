@@ -81,13 +81,55 @@ class ApiService {
         this.updateBaseUrl(); 
     }
     
-    // NIEUW: Functie om in te loggen en het JWT token op te halen
+    // HULPFUNCTIE: Verwijder trailing slashes om dubbele slashes in URL's te voorkomen
+    private cleanUrl(url: string): string {
+        return url ? url.replace(/\/+$/, '') : '';
+    }
+
+    // NIEUW: Health Check functie voor debugging
+    async checkHealth(url: string): Promise<{ success: boolean; message: string; details?: any }> {
+        const cleanBase = this.cleanUrl(url);
+        const healthUrl = `${cleanBase}/api/health`;
+        
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 sec timeout
+
+            const response = await fetch(healthUrl, { 
+                mode: 'cors',
+                signal: controller.signal
+            });
+            
+            clearTimeout(timeoutId);
+
+            if (response.ok) {
+                // Probeer JSON te parsen als de API dat teruggeeft, anders tekst
+                try {
+                    const data = await response.json();
+                    return { success: true, message: 'Verbinding Geslaagd!', details: data };
+                } catch {
+                    return { success: true, message: 'Verbinding Geslaagd (Geen JSON response)' };
+                }
+            } else {
+                return { success: false, message: `Server antwoordde met fout: ${response.status} ${response.statusText}` };
+            }
+        } catch (error: any) {
+            let msg = 'Kan geen verbinding maken.';
+            if (error.name === 'AbortError') msg = 'Timeout: Server reageert niet binnen 5 seconden.';
+            if (error.message.includes('Failed to fetch')) msg = 'Netwerkfout: Server onbereikbaar of CORS geblokkeerd.';
+            
+            return { success: false, message: msg, details: error.message };
+        }
+    }
+    
+    // Functie om in te loggen en het JWT token op te halen
     async login(url: string, username: string, password?: string): Promise<string> {
         if (!password) {
             throw new Error('Wachtwoord is verplicht om in te loggen.');
         }
         
-        const loginUrl = `${url}/login/auth`;
+        // Gebruik cleanUrl om dubbele slashes te voorkomen
+        const loginUrl = `${this.cleanUrl(url)}/login/auth`;
         
         // --- API CALL ---
         const headers = { 'Content-Type': 'application/json' };
@@ -116,7 +158,8 @@ class ApiService {
 
     private updateBaseUrl() {
         if (this.config.url && this.config.endpointName) {
-            this.apiBaseUrl = `${this.config.url}/api/${this.config.endpointName}`; 
+            // Gebruik cleanUrl
+            this.apiBaseUrl = `${this.cleanUrl(this.config.url)}/api/${this.config.endpointName}`; 
         } else {
             this.apiBaseUrl = '';
         }
@@ -833,8 +876,23 @@ class ApiService {
             <div class="space-y-3">
               <div>
                 <label class="block text-sm font-medium text-gray-400 mb-1">API URL (Inclusief poort 8080)</label>
-                <input type="url" [(ngModel)]="newApiConfig.url" placeholder="http://mijn-server-ip:8080" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
+                <div class="flex gap-2">
+                    <input type="url" [(ngModel)]="newApiConfig.url" placeholder="http://mijn-server-ip:8080" class="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
+                    
+                    <!-- NIEUWE TEST KNOP -->
+                    <button (click)="testApiConnection()" 
+                            [disabled]="isTestingConnection()"
+                            class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-2 rounded-lg text-xs font-medium border border-gray-600 transition-colors flex items-center gap-2 flex-shrink-0">
+                         <span *ngIf="isTestingConnection()" class="animate-spin h-3 w-3 border-2 border-gray-400 border-t-transparent rounded-full"></span>
+                         Test Verbinding (api/health)
+                    </button>
+                </div>
+                <!-- Test Resultaat Bericht -->
+                <div *ngIf="connectionTestResult()" [class]="connectionTestResult()!.success ? 'text-green-400' : 'text-red-400'" class="text-xs mt-1 font-mono break-all">
+                    {{ connectionTestResult()!.message }}
+                </div>
               </div>
+
               <!-- NIEUW VELD: Endpoint Naam -->
               <div>
                 <label class="block text-sm font-medium text-gray-400 mb-1">Unieke Endpoint Naam (aangemaakt in dashboard)</label>
@@ -1257,6 +1315,10 @@ export class App {
   bulkEditCustomCategory = '';
   bulkEditDescription = '';
   
+  // Connection Test State
+  isTestingConnection = signal(false);
+  connectionTestResult = signal<{ success: boolean; message: string; details?: any } | null>(null);
+
   newRule: CategorizationRule = { id: this.generateUUID(), keyword: '', category: '', type: 'config', subType: 'rule', newDescription: '' };
 
   // Category Management State
@@ -1368,6 +1430,22 @@ export class App {
       } finally {
         this.isLoading.set(false);
       }
+  }
+
+  // --- NIEUWE FUNCTIE VOOR HET TESTEN VAN DE VERBINDING ---
+  async testApiConnection() {
+      if (!this.newApiConfig.url) {
+          alert('Vul eerst een URL in om te testen.');
+          return;
+      }
+      
+      this.isTestingConnection.set(true);
+      this.connectionTestResult.set(null);
+      
+      const result = await this.apiService.checkHealth(this.newApiConfig.url);
+      
+      this.connectionTestResult.set(result);
+      this.isTestingConnection.set(false);
   }
   
   async saveItem<T extends { id: string, type: string }>(item: T): Promise<T> {
