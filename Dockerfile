@@ -1,16 +1,17 @@
 # STAGE 1: Build de Angular applicatie
-FROM node:18-alpine as build
+FROM node:18-alpine AS build
 WORKDIR /app
 
 # Kopieer package.json en installeer afhankelijkheden
 COPY package*.json ./
-RUN npm install
+# Gebruik --legacy-peer-deps om eventuele peer dependency waarschuwingen te negeren in Alpine
+RUN npm install --legacy-peer-deps
 
 # Kopieer de rest van de code en voer de build uit
 COPY . .
-# Let op: Vervang 'personal-finance-tracker' met de daadwerkelijke naam
-# die Angular CLI gebruikt voor de output map (vaak hetzelfde als de projectnaam)
-RUN npm run build --output-path=./dist/app
+# Voer de standaard Angular productiel build uit.
+# De output map wordt automatisch bepaald door angular.json.
+RUN npm run build --configuration=production
 
 # STAGE 2: Serveer met Nginx
 FROM nginx:alpine
@@ -18,7 +19,8 @@ FROM nginx:alpine
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Kopieer de gebouwde statische bestanden van stage 1 naar de Nginx webroot
-COPY --from=build /app/dist/app /usr/share/nginx/html
+# LET OP: Controleer of 'personal-finance-tracker' de juiste projectnaam is.
+COPY --from=build /app/dist/personal-finance-tracker/browser /usr/share/nginx/html
 
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]
