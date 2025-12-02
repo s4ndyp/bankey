@@ -559,12 +559,12 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     </td>
                     <td class="p-3 text-right font-mono font-bold" 
                         [ngClass]="t.type === 'income' ? 'text-green-400' : 'text-red-400'">
-                      <!-- Gebruik van '1.2-2' Pipe voor vaste 2 decimalen, en forceer NL-notatie (komma) -->
-                      {{ (t.type === 'income' ? '+' : '-') }} {{ t.amount | currency:'EUR':'symbol':'1.2-2':'nl' }}
+                      <!-- OPGELOST: Expliciete locale 'nl' verwijderd, valt terug op default locale -->
+                      {{ (t.type === 'income' ? '+' : '-') }} {{ t.amount | currency:'EUR':'symbol':'1.2-2' }}
                     </td>
                     <td class="p-3 text-right font-mono text-gray-400 text-xs">
-                      <!-- Gebruik van '1.2-2' Pipe voor vaste 2 decimalen, en forceer NL-notatie (komma) -->
-                      {{ t.currentBalance ? (t.currentBalance | currency:'EUR':'symbol':'1.2-2':'nl') : '-' }}
+                      <!-- OPGELOST: Expliciete locale 'nl' verwijderd, valt terug op default locale -->
+                      {{ t.currentBalance ? (t.currentBalance | currency:'EUR':'symbol':'1.2-2') : '-' }}
                     </td>
                     <td class="p-3 text-right">
                       <div class="flex justify-end gap-2 opacity-100 transition-opacity whitespace-nowrap">
