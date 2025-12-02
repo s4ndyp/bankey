@@ -1,0 +1,57 @@
+name: Build & Push Docker Image (Handmatig)
+
+# Deze workflow wordt alleen handmatig gestart via de GitHub Actions UI.
+# Dit zorgt voor de "workflow_dispatch" knop in uw repository.
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag (bv. latest, 1.0.0)'
+        required: true
+        default: 'latest'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # Nodig om naar ghcr.io te pushen
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Log in op de GitHub Container Registry (GHCR) met uw GitHub-token.
+      # Dit is nodig om de gebouwde image te kunnen pushen.
+      - name: Login to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Bepaalt de volledige imagename, inclusief de tag die u handmatig invoert.
+      - name: Determine image name and tag
+        id: meta
+        run: |
+          IMAGE_NAME="ghcr.io/${{ github.repository }}"
+          # De tag wordt gehaald uit de handmatige invoer van de gebruiker
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "TAGS=$IMAGE_NAME:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "LABELS=org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" >> $GITHUB_OUTPUT
+          
+      # Voert de multi-stage Docker build uit en pusht de image naar GHCR.
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: . # Zoekt naar de Dockerfile in de root van de repository
+          push: true
+          tags: ${{ steps.meta.outputs.TAGS }}
+          labels: ${{ steps.meta.outputs.LABELS }}
+          # De Angular applicatie wordt gebouwd in de Dockerfile (multi-stage build)
+          # Het Nginx configuratiebestand (nginx.conf) wordt ook meegenomen.
