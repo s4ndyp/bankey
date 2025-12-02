@@ -11,6 +11,7 @@ interface Transaction {
   type: 'income' | 'expense';
   category: string;
   accountNumber?: string;
+  currentBalance?: number; // Nieuw veld: Saldo na transactie
 }
 
 interface CsvMapping {
@@ -19,6 +20,7 @@ interface CsvMapping {
   amountCol: number;
   categoryCol?: number;
   accountCol?: number;
+  balanceCol?: number; // Nieuw veld voor import
 }
 
 type Period = '1M' | '6M' | '1Y' | 'ALL';
@@ -240,26 +242,41 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
               </div>
             </div>
             
-             <!-- 3. Uitgaven per Categorie (Bar Chart - NEW) -->
+             <!-- 3. Uitgaven per Categorie (Bar Chart - FIXED) -->
             <div class="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-lg">
                <h3 class="text-lg font-semibold mb-6 flex items-center gap-2">
                 <span class="w-2 h-6 bg-red-500 rounded-full"></span>
                 Uitgaven per Categorie (Top)
               </h3>
-              <div class="h-64 flex items-end justify-between gap-2">
-                <div *ngFor="let item of barChartData()" class="flex-1 flex flex-col items-center group">
-                  <div class="w-full rounded-t-sm relative transition-all duration-300 hover:opacity-80" 
-                       [style.height.%]="item.pct"
-                       [style.background-color]="item.color">
-                       <!-- Tooltip -->
-                       <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none transition-opacity border border-gray-600">
-                         {{ item.label }}: {{ item.value | currency:'EUR':'symbol':'1.0-0' }}
-                       </div>
+              
+              <div class="flex h-64 gap-2">
+                <!-- Y-Axis Scale (New) -->
+                <div class="flex flex-col justify-between text-xs text-gray-500 w-12 text-right pr-2 border-r border-gray-700 h-full py-1">
+                   <span>{{ getBarMax() | currency:'EUR':'symbol':'1.0-0' }}</span>
+                   <span>{{ getBarMax() / 2 | currency:'EUR':'symbol':'1.0-0' }}</span>
+                   <span>0</span>
+                </div>
+
+                <!-- Bars Container -->
+                <div class="flex-1 flex items-end justify-between gap-2 h-full pb-1">
+                  <div *ngFor="let item of barChartData()" class="flex-1 flex flex-col items-center group h-full justify-end">
+                    
+                    <!-- Bar with explicit height style logic -->
+                    <div class="w-full rounded-t-sm relative transition-all duration-300 hover:opacity-80" 
+                         [style.height.%]="item.pct"
+                         [style.background-color]="item.color">
+                         
+                         <!-- Tooltip -->
+                         <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 whitespace-nowrap z-10 pointer-events-none transition-opacity border border-gray-600">
+                           {{ item.label }}: {{ item.value | currency:'EUR':'symbol':'1.0-0' }}
+                         </div>
+                    </div>
+                    
+                    <!-- Rotating labels for readability -->
+                    <span class="text-xs text-gray-500 mt-2 rotate-45 sm:rotate-0 origin-left truncate w-full text-center min-h-[1.25rem]" [title]="item.label">
+                      {{ item.label.length > 8 ? item.label.slice(0,6) + '..' : item.label }}
+                    </span>
                   </div>
-                  <!-- Rotating labels for readability -->
-                  <span class="text-xs text-gray-500 mt-2 rotate-45 sm:rotate-0 origin-left truncate w-full text-center" [title]="item.label">
-                    {{ item.label.length > 8 ? item.label.slice(0,6) + '..' : item.label }}
-                  </span>
                 </div>
               </div>
             </div>
@@ -325,6 +342,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     <th class="p-4 font-semibold">Omschrijving</th>
                     <th class="p-4 font-semibold">Categorie</th>
                     <th class="p-4 font-semibold text-right">Bedrag</th>
+                    <th class="p-4 font-semibold text-right">Saldo</th>
                     <th class="p-4 font-semibold text-right">Actie</th>
                   </tr>
                 </thead>
@@ -344,6 +362,9 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                         [ngClass]="t.type === 'income' ? 'text-green-400' : 'text-red-400'">
                       {{ (t.type === 'income' ? '+' : '-') }} {{ t.amount | currency:'EUR':'symbol':'1.2-2' }}
                     </td>
+                    <td class="p-4 text-right font-mono text-gray-400 text-sm">
+                      {{ t.currentBalance ? (t.currentBalance | currency:'EUR':'symbol':'1.2-2') : '-' }}
+                    </td>
                     <td class="p-4 text-right">
                       <div class="flex justify-end gap-2 opacity-100 transition-opacity">
                          <button (click)="$event.stopPropagation(); openModal(t)" class="p-1 hover:bg-blue-900/50 rounded text-blue-400 cursor-pointer" title="Bewerken">
@@ -356,7 +377,7 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                     </td>
                   </tr>
                   <tr *ngIf="filteredTransactions().length === 0">
-                    <td colspan="6" class="p-12 text-center">
+                    <td colspan="7" class="p-12 text-center">
                        <div class="flex flex-col items-center justify-center text-gray-500">
                          <svg class="w-12 h-12 mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                          <p>Geen transacties gevonden.</p>
@@ -458,9 +479,15 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                   <input type="text" [(ngModel)]="currentTransaction.description" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" placeholder="Bijv. Albert Heijn">
                 </div>
                 
-                <div>
-                   <label class="block text-sm font-medium text-gray-400 mb-1">Rekeningnummer (Optioneel)</label>
-                   <input type="text" [(ngModel)]="currentTransaction.accountNumber" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" placeholder="NL01BANK...">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                       <label class="block text-sm font-medium text-gray-400 mb-1">Rekening (Optioneel)</label>
+                       <input type="text" [(ngModel)]="currentTransaction.accountNumber" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" placeholder="NL01BANK...">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Saldo na Tx (Optioneel)</label>
+                        <input type="number" [(ngModel)]="currentTransaction.currentBalance" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" placeholder="0.00">
+                    </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
@@ -474,13 +501,26 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                   </div>
                 </div>
 
+                <!-- Fixed Categorie Selectie (Dropdown + Input) -->
                 <div>
                   <label class="block text-sm font-medium text-gray-400 mb-1">Categorie</label>
-                  <div class="relative">
-                    <input type="text" list="categories" [(ngModel)]="currentTransaction.category" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow" placeholder="Zoek of typ nieuw...">
-                    <datalist id="categories">
-                      <option *ngFor="let cat of uniqueCategories()" [value]="cat"></option>
-                    </datalist>
+                  <div class="space-y-2">
+                      <select 
+                        [ngModel]="isNewCategoryMode ? '__NEW__' : currentTransaction.category" 
+                        (ngModelChange)="handleCategoryChange($event)"
+                        class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none cursor-pointer">
+                          <option *ngFor="let cat of uniqueCategories()" [value]="cat">{{ cat }}</option>
+                          <option disabled>──────────</option>
+                          <option value="__NEW__" class="text-blue-400 font-bold">+ Nieuwe Categorie...</option>
+                      </select>
+                      
+                      <!-- Toon alleen als 'Nieuwe Categorie' is gekozen -->
+                      <div *ngIf="isNewCategoryMode" class="animate-fade-in relative">
+                         <input type="text" [(ngModel)]="currentTransaction.category" #newCatInput
+                                class="w-full bg-gray-800 border border-blue-500 rounded-lg px-4 py-2.5 text-white focus:outline-none" 
+                                placeholder="Typ nieuwe categorie naam...">
+                         <button (click)="isNewCategoryMode = false; currentTransaction.category = uniqueCategories()[0] || 'Algemeen'" class="absolute right-2 top-2 text-xs text-red-400 hover:text-white bg-gray-900 px-2 py-1 rounded">Annuleer</button>
+                      </div>
                   </div>
                 </div>
             </div>
@@ -546,9 +586,16 @@ type Period = '1M' | '6M' | '1Y' | 'ALL';
                          <option *ngFor="let h of csvPreviewHeaders; let i = index" [value]="i">{{h}} (Col {{i+1}})</option>
                       </select>
                    </div>
-                   <div class="sm:col-span-2">
+                   <div>
                       <label class="block text-sm font-medium text-blue-400 mb-1">Rekeningnummer (Optioneel)</label>
                       <select [(ngModel)]="csvMapping.accountCol" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white">
+                         <option [ngValue]="undefined">Niet importeren</option>
+                         <option *ngFor="let h of csvPreviewHeaders; let i = index" [value]="i">{{h}} (Col {{i+1}})</option>
+                      </select>
+                   </div>
+                   <div>
+                      <label class="block text-sm font-medium text-blue-400 mb-1">Saldo (Optioneel)</label>
+                      <select [(ngModel)]="csvMapping.balanceCol" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-white">
                          <option [ngValue]="undefined">Niet importeren</option>
                          <option *ngFor="let h of csvPreviewHeaders; let i = index" [value]="i">{{h}} (Col {{i+1}})</option>
                       </select>
@@ -649,6 +696,7 @@ export class App {
   // Transaction Modal State
   showModal = false;
   isEditing = false;
+  isNewCategoryMode = false; // Toggle voor categorie input
   currentTransaction: Transaction = this.getEmptyTransaction();
 
   // CSV Import State
@@ -656,7 +704,7 @@ export class App {
   csvRawData: string[][] = [];
   csvPreviewHeaders: string[] = [];
   csvPreviewRow: string[] = [];
-  csvMapping: CsvMapping = { dateCol: 0, descCol: 1, amountCol: 2, accountCol: undefined };
+  csvMapping: CsvMapping = { dateCol: 0, descCol: 1, amountCol: 2, accountCol: undefined, balanceCol: undefined };
 
   // Bulk Edit State
   showBulkEditModal = false;
@@ -797,9 +845,18 @@ export class App {
     // Take top 8 only to prevent clutter
     const topData = data.slice(0, 8);
 
-    const max = Math.max(...topData.map(d => d.value), 1);
+    // Helper for max, ensure not 0 to avoid division by zero
+    const max = Math.max(...topData.map(d => d.value), 10); // Minimum scale of 10
+    
     return topData.map(d => ({ ...d, pct: (d.value / max) * 100 }));
   });
+
+  getBarMax() {
+      const data = this.barChartData();
+      if (!data.length) return 0;
+      // Reverse calculation to get the 'max' value used for scaling
+      return Math.max(...data.map(d => (d.value / d.pct) * 100), 100);
+  }
 
   // Updated Line Chart Data with smart grouping
   lineChartData = computed(() => {
@@ -981,6 +1038,41 @@ export class App {
       alert(`${filteredIds.length} transacties bijgewerkt.`);
   }
 
+  // Helper: Smart Parse number
+  parseSmartNumber(amountStr: string): number {
+      if (!amountStr) return 0;
+      amountStr = amountStr.trim();
+      let amount = 0;
+              
+      // Case 1: Contains both . and ,
+      if (amountStr.includes(',') && amountStr.includes('.')) {
+            if (amountStr.lastIndexOf(',') > amountStr.lastIndexOf('.')) {
+                // 1.250,50 (NL)
+                amountStr = amountStr.replace(/\./g, '').replace(',', '.');
+            } else {
+                // 1,250.50 (US)
+                amountStr = amountStr.replace(/,/g, '');
+            }
+      } 
+      // Case 2: Only comma
+      else if (amountStr.includes(',')) {
+            // Often Dutch decimal (10,50)
+            amountStr = amountStr.replace(',', '.');
+      }
+      // Case 3: Only dot
+      else if (amountStr.includes('.')) {
+            // Can be 10.50 (US decimal) or 1.000 (NL Thousand)
+            // Heuristic: If there is more than one dot, it's definitely thousands
+            const parts = amountStr.split('.');
+            if (parts.length > 2) {
+                amountStr = amountStr.replace(/\./g, '');
+            }
+      }
+
+      amount = parseFloat(amountStr);
+      return isNaN(amount) ? 0 : amount;
+  }
+
   // CSV Import
   handleCsvFile(event: any) {
     const file = event.target.files[0];
@@ -1007,7 +1099,7 @@ export class App {
   }
 
   processCsvImport() {
-      const { dateCol, descCol, amountCol, accountCol } = this.csvMapping;
+      const { dateCol, descCol, amountCol, accountCol, balanceCol } = this.csvMapping;
       const dataRows = this.csvRawData.slice(1); 
       const newTxs: Transaction[] = [];
       let skipped = 0;
@@ -1019,47 +1111,10 @@ export class App {
           }
 
           try {
-              let amountStr = row[amountCol].trim();
+              let amount = this.parseSmartNumber(row[amountCol]);
               
-              // Smart Parsing for Amounts (NL vs US)
-              let amount = 0;
-              
-              // Case 1: Contains both . and ,
-              if (amountStr.includes(',') && amountStr.includes('.')) {
-                   if (amountStr.lastIndexOf(',') > amountStr.lastIndexOf('.')) {
-                       // 1.250,50 (NL)
-                       amountStr = amountStr.replace(/\./g, '').replace(',', '.');
-                   } else {
-                       // 1,250.50 (US)
-                       amountStr = amountStr.replace(/,/g, '');
-                   }
-              } 
-              // Case 2: Only comma
-              else if (amountStr.includes(',')) {
-                   // Often Dutch decimal (10,50)
-                   amountStr = amountStr.replace(',', '.');
-              }
-              // Case 3: Only dot
-              else if (amountStr.includes('.')) {
-                   // Can be 10.50 (US decimal) or 1.000 (NL Thousand)
-                   // Heuristic: If there is more than one dot, it's definitely thousands
-                   const parts = amountStr.split('.');
-                   if (parts.length > 2) {
-                       amountStr = amountStr.replace(/\./g, '');
-                   }
-                   // If just one dot (e.g. 10.50), JS parseFloat handles it correctly as decimal.
-                   // If it was a thousand separator (1.000), JS sees 1.0. 
-                   // This is ambiguous, but most CSVs export raw numbers (1000.50) rather than formatted thousands (1.000).
-                   // The user complained about "too big", implying we STRIPPED the dot from 10.50 making it 1050.
-                   // So we do NOTHING here, letting parseFloat handle 10.50 correctly.
-              }
-
-              amount = parseFloat(amountStr);
-              
-              if (isNaN(amount)) { 
-                console.warn(`Row ${index} invalid amount`, row[amountCol]);
-                skipped++; 
-                return; 
+              if (amount === 0 && row[amountCol] !== '0') { 
+                 // It might be genuinely 0, but check validity
               }
 
               let dateRaw = row[dateCol];
@@ -1088,15 +1143,21 @@ export class App {
 
               const type = amount >= 0 ? 'income' : 'expense';
               const acc = accountCol !== undefined ? row[accountCol] : undefined;
+              
+              let currentBal = undefined;
+              if (balanceCol !== undefined) {
+                  currentBal = this.parseSmartNumber(row[balanceCol]);
+              }
 
               newTxs.push({
-                  id: this.generateUUID(), // Using Safe UUID
+                  id: this.generateUUID(),
                   date: dateStr,
                   description: row[descCol],
                   amount: Math.abs(amount),
                   type: type,
                   category: 'Onbekend',
-                  accountNumber: acc
+                  accountNumber: acc,
+                  currentBalance: currentBal
               });
           } catch (e) {
               console.error(`Row ${index} error:`, e);
@@ -1111,10 +1172,27 @@ export class App {
 
   // Basic CRUD
   openModal(t?: Transaction) {
-    if (t) { this.currentTransaction = { ...t }; this.isEditing = true; }
-    else { this.currentTransaction = this.getEmptyTransaction(); this.isEditing = false; }
+    this.isNewCategoryMode = false;
+    if (t) { 
+        this.currentTransaction = { ...t }; 
+        this.isEditing = true; 
+    } else { 
+        this.currentTransaction = this.getEmptyTransaction(); 
+        this.isEditing = false; 
+    }
     this.showModal = true;
   }
+  
+  handleCategoryChange(value: string) {
+      if (value === '__NEW__') {
+          this.isNewCategoryMode = true;
+          this.currentTransaction.category = '';
+      } else {
+          this.isNewCategoryMode = false;
+          this.currentTransaction.category = value;
+      }
+  }
+
   closeModal() { this.showModal = false; }
   
   saveTransaction() {
@@ -1126,6 +1204,10 @@ export class App {
     if (this.currentTransaction.amount === null || this.currentTransaction.amount === undefined) {
       alert('Vul een bedrag in.');
       return;
+    }
+    if (this.isNewCategoryMode && !this.currentTransaction.category) {
+        alert('Vul een nieuwe categorie naam in.');
+        return;
     }
 
     if (this.isEditing) {
@@ -1148,7 +1230,16 @@ export class App {
     }
   }
 
-  getEmptyTransaction(): Transaction { return { id: '', date: new Date().toISOString().slice(0, 10), description: '', amount: 0, type: 'expense', category: 'Algemeen' }; }
+  getEmptyTransaction(): Transaction { 
+      return { 
+          id: '', 
+          date: new Date().toISOString().slice(0, 10), 
+          description: '', 
+          amount: 0, 
+          type: 'expense', 
+          category: 'Algemeen' 
+      }; 
+  }
   
   // Matrix Helpers
   getMatrixValue(category: string, month: string): number {
@@ -1190,7 +1281,8 @@ export class App {
             amount: isIncome ? 2500 + Math.floor(Math.random() * 500) : 5 + Math.floor(Math.random() * 200),
             type: isIncome ? 'income' : 'expense',
             category: cat,
-            accountNumber: `NL${Math.floor(Math.random()*99)}BANK0${Math.floor(Math.random()*999999999)}`
+            accountNumber: `NL${Math.floor(Math.random()*99)}BANK0${Math.floor(Math.random()*999999999)}`,
+            currentBalance: 1000 + Math.floor(Math.random() * 5000)
         });
     }
     this.transactions.set(dummy);
