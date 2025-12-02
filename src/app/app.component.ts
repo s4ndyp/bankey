@@ -7,6 +7,7 @@ interface ApiConfig {
     url: string; // Bijv. 'http://andere-server:8080'
     token: string;
     username?: string; // Optioneel, alleen voor weergave
+    endpointName: string; // NIEUW: Naam van het unieke dashboard endpoint
 }
 
 interface Transaction {
@@ -30,9 +31,11 @@ interface CsvMapping {
   balanceCol?: number;
 }
 
+// Alle configuratie items krijgen nu de vlag 'config' voor eenvoudige bulk-delete.
 interface CsvMappingTemplate extends CsvMapping {
   name: string;
-  type: 'mapping_template'; // Marker voor de API
+  type: 'config'; 
+  subType: 'mapping_template'; // Unieke subType
 }
 
 interface CategorizationRule {
@@ -40,36 +43,51 @@ interface CategorizationRule {
     keyword: string; // Trefwoord in omschrijving
     category: string; // Nieuwe categorie
     newDescription?: string; // Nieuwe omschrijving
-    type: 'rule'; // Marker voor de API
+    type: 'config';
+    subType: 'rule';
 }
 
 interface AccountNameRecord {
     id: string; // vast ID voor dit record
     names: Record<string, string>;
-    type: 'account_names'; // Marker voor de API
+    type: 'config';
+    subType: 'account_names';
 }
 
 interface ManualCategoryRecord {
     id: string; // vast ID
     categories: string[];
-    type: 'manual_categories'; // Marker voor de API
+    type: 'config';
+    subType: 'manual_categories';
 }
 
 type Period = '1M' | '6M' | '1Y' | 'ALL';
 
 // --- API Service Logic ---
 class ApiService {
-    private config: ApiConfig = { url: '', token: '', username: '' };
-    private apiUrl = '';
+    private config: ApiConfig = { url: '', token: '', endpointName: 'finance-data' };
+    // NIEUW: De base URL wordt nu dynamisch samengesteld
+    private apiBaseUrl = ''; 
+    private transactionType = 'transaction';
+    private configType = 'config'; // Generieke type voor alle configuratie
 
     constructor(initialConfig: ApiConfig) {
         this.config = initialConfig;
-        this.apiUrl = `${this.config.url}/api/items`;
+        this.updateBaseUrl(); 
+    }
+
+    private updateBaseUrl() {
+        if (this.config.url && this.config.endpointName) {
+            // Gebruikt de ingevoerde endpoint naam
+            this.apiBaseUrl = `${this.config.url}/api/${this.config.endpointName}`; 
+        } else {
+            this.apiBaseUrl = '';
+        }
     }
 
     public updateConfig(newConfig: ApiConfig) {
         this.config = newConfig;
-        this.apiUrl = `${this.config.url}/api/items`;
+        this.updateBaseUrl();
         // Opslaan in localStorage voor persistentie tussen sessies
         localStorage.setItem('apiConfig', JSON.stringify(newConfig));
     }
@@ -79,8 +97,8 @@ class ApiService {
     }
 
     private async callApi(url: string, method: string, data: any = null): Promise<any> {
-        if (!this.config.url || !this.config.token) {
-            throw new Error('API URL of Token is niet ingesteld.');
+        if (!this.config.url || !this.config.token || !this.apiBaseUrl) {
+            throw new Error('API URL, Endpoint Naam, of Token is niet ingesteld.');
         }
 
         const headers = {
@@ -89,62 +107,75 @@ class ApiService {
             'Access-Control-Allow-Origin': '*' // Nodig voor CORS
         };
 
-        const options: RequestInit = {
-            method: method,
-            headers: headers,
-            body: data ? JSON.stringify(data) : null,
-            mode: 'cors'
-        };
+        // Exponential Backoff Retry Logic
+        const maxRetries = 3;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            try {
+                const options: RequestInit = {
+                    method: method,
+                    headers: headers,
+                    body: data ? JSON.stringify(data) : null,
+                    mode: 'cors'
+                };
 
-        const response = await fetch(url, options);
+                const response = await fetch(url, options);
 
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`API Fout (${response.status}): ${errorText.substring(0, 150)}`);
+                if (response.status === 429) { // Rate limit or temporary error
+                    if (attempt < maxRetries - 1) {
+                        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                        await new Promise(res => setTimeout(res, delay));
+                        continue; // Retry
+                    }
+                }
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`API Fout (${response.status}): ${errorText.substring(0, 150)}`);
+                }
+                
+                // DELETE (204) heeft geen body
+                if (method === 'DELETE') return { status: 'deleted' };
+
+                return response.json();
+            } catch (e) {
+                if (attempt === maxRetries - 1) throw e; // Last attempt failed
+                const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                await new Promise(res => setTimeout(res, delay));
+            }
         }
-        
-        // DELETE (204) heeft geen body
-        if (method === 'DELETE') return { status: 'deleted' };
-
-        return response.json();
     }
     
     // --- Algemene CRUD Functies ---
 
-    // Haalt alle items op, optioneel filteren op type
-    async getItems<T>(filterType?: string): Promise<T[]> {
-        let url = this.apiUrl;
-        let queryParams = '';
-        if (filterType) {
-             queryParams += `type=${filterType}`;
-        }
-        if (queryParams) {
-            url += `?${queryParams}`;
-        }
-        
-        // De API retourneert een array van objecten: {id: 'mongo_id', data: {...document...}}
+    // Haalt alle transacties op
+    async getTransactions<T>(): Promise<T[]> {
+        const url = `${this.apiBaseUrl}?type=${this.transactionType}`;
         const result: { id: string, data: T }[] = await this.callApi(url, 'GET');
-        
-        // We mappen het resultaat naar de gewenste structuur (waarbij 'id' al in 'data' zit)
+        return result.map(item => ({...item.data, id: item.id}));
+    }
+    
+    // Haalt alle configuratie items van een bepaald subType op
+    async getConfigItems<T>(subType: string): Promise<T[]> {
+        // Filter op type=config EN subType=<de specifieke subType>
+        const url = `${this.apiBaseUrl}?type=${this.configType}&subType=${subType}`; 
+        const result: { id: string, data: T }[] = await this.callApi(url, 'GET');
         return result.map(item => ({...item.data, id: item.id}));
     }
 
     // Voegt een nieuw item toe
     async addItem<T>(item: T): Promise<T> {
-        // Zorg ervoor dat de 'id' property van de Angular app weg is
         const dataToSend = { ...item };
         if ((dataToSend as any).id) delete (dataToSend as any).id;
         
-        const result: { id: string, data: T } = await this.callApi(this.apiUrl, 'POST', dataToSend);
+        const result: { id: string, data: T } = await this.callApi(this.apiBaseUrl, 'POST', dataToSend);
         return { ...result.data, id: result.id };
     }
 
     // Werkt een bestaand item bij
     async updateItem<T extends { id: string }>(item: T): Promise<T> {
         const id = item.id;
-        const url = `${this.apiUrl}/${id}`;
+        const url = `${this.apiBaseUrl}/${id}`;
         
-        // Stuur het volledige object (zonder de 'id' in de body)
         const dataToSend = { ...item };
         delete (dataToSend as any).id; 
         
@@ -154,13 +185,13 @@ class ApiService {
     
     // Verwijdert een item
     async deleteItem(id: string): Promise<void> {
-        const url = `${this.apiUrl}/${id}`;
+        const url = `${this.apiBaseUrl}/${id}`;
         await this.callApi(url, 'DELETE');
     }
     
-    // Verwijdert meerdere items op basis van een filter (bijv. type='transaction')
-    async deleteBulk(key: string, value: string): Promise<void> {
-        const url = `${this.apiUrl}?${key}=${value}`;
+    // Verwijdert ALLE items van een bepaald type (bijv. type=transaction of type=config)
+    async deleteBulk(type: 'transaction' | 'config'): Promise<void> {
+        const url = `${this.apiBaseUrl}?type=${type}`;
         await this.callApi(url, 'DELETE');
     }
 }
@@ -186,7 +217,7 @@ class ApiService {
               </div>
               <span class="font-bold text-xl tracking-tight hidden sm:block">MijnFinanciën</span>
               <span *ngIf="apiConfig().url" class="text-xs text-gray-500 ml-4 hidden sm:block">
-                 API: {{ apiConfig().url | slice:0:30 }}... | Gebruiker: {{ apiConfig().username }}
+                 API: {{ apiConfig().endpointName }} op {{ apiConfig().url | slice:7:30 }}... | Gebruiker: {{ apiConfig().username }}
               </span>
             </div>
             
@@ -208,7 +239,7 @@ class ApiService {
         <!-- === API CONNECTION SETUP VIEW === -->
         <div *ngIf="!apiConfig().token && activeTab() !== 'settings'" class="p-8 bg-yellow-900/50 border border-yellow-700 rounded-xl shadow-xl text-center mb-8">
             <h3 class="text-2xl font-bold text-yellow-300 mb-2">API Verbinding Vereist</h3>
-            <p class="text-yellow-400 mb-4">Om de applicatie te gebruiken, moet je eerst de URL, gebruikersnaam en JWT-token van de API Gateway instellen op het tabblad "Beheer".</p>
+            <p class="text-yellow-400 mb-4">Om de applicatie te gebruiken, moet je eerst de URL, **Endpoint Naam** en JWT-token van de API Gateway instellen op het tabblad "Beheer".</p>
             <button (click)="activeTab.set('settings')" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded-lg font-medium transition-colors">
               Ga naar Instellingen
             </button>
@@ -770,6 +801,11 @@ class ApiService {
                 <label class="block text-sm font-medium text-gray-400 mb-1">API URL (Inclusief poort 8080)</label>
                 <input type="url" [(ngModel)]="newApiConfig.url" placeholder="http://mijn-server-ip:8080" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
               </div>
+              <!-- NIEUW VELD: Endpoint Naam -->
+              <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">Unieke Endpoint Naam (aangemaakt in dashboard)</label>
+                <input type="text" [(ngModel)]="newApiConfig.endpointName" placeholder="bv. finance-app-v1" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
+              </div>
               <div>
                 <label class="block text-sm font-medium text-gray-400 mb-1">Gebruikersnaam (voor weergave)</label>
                 <input type="text" [(ngModel)]="newApiConfig.username" placeholder="Gebruikersnaam" class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow text-sm">
@@ -1121,6 +1157,7 @@ export class App {
   private apiService: ApiService;
   
   // States voor de API Configuratie
+  // NIEUW: endpointName toegevoegd
   apiConfig = signal<ApiConfig>(this.loadApiConfig());
   newApiConfig: ApiConfig = this.loadApiConfig(); // Temp state voor de form
   isLoading = signal(false);
@@ -1182,7 +1219,8 @@ export class App {
   bulkEditDescription = '';
   
   // Rules Tab State
-  newRule: CategorizationRule = { id: this.generateUUID(), keyword: '', category: '', type: 'rule', newDescription: '' };
+  // Type en subType aangepast
+  newRule: CategorizationRule = { id: this.generateUUID(), keyword: '', category: '', type: 'config', subType: 'rule', newDescription: '' };
 
   // Category Management State
   newCategoryName = ''; // Voor handmatig toevoegen op Regels pagina
@@ -1190,30 +1228,33 @@ export class App {
   constructor() {
     this.apiService = new ApiService(this.apiConfig());
     this.loadAllData();
-    
-    // De oude localStorage effects worden verwijderd omdat we de API gebruiken
-    // Een effect om de configuratie te updaten is niet meer nodig, dit gebeurt nu in updateConfig/saveApiConfig
   }
   
   // --- DATA LOADING & API WRAPPERS ---
   
   loadApiConfig(): ApiConfig {
+      const defaultConfig: ApiConfig = { url: '', token: '', username: 'Onbekend', endpointName: 'finance' };
       try {
           const configStr = localStorage.getItem('apiConfig');
           if (configStr) {
               const config = JSON.parse(configStr);
-              // Zorg dat de URL in de form wordt geladen
-              return { url: config.url || '', token: config.token || '', username: config.username || 'Onbekend' };
+              // Zorg dat alle velden geladen worden, met defaults voor nieuwe velden
+              return { 
+                  url: config.url || '', 
+                  token: config.token || '', 
+                  username: config.username || 'Onbekend',
+                  endpointName: config.endpointName || defaultConfig.endpointName
+              };
           }
       } catch (e) {
           console.error('Fout bij laden API config:', e);
       }
-      return { url: '', token: '', username: 'Onbekend' };
+      return defaultConfig;
   }
   
   async saveApiConfig() {
-    if (!this.newApiConfig.url || !this.newApiConfig.token) {
-        alert("Vul de API URL en JWT Token in.");
+    if (!this.newApiConfig.url || !this.newApiConfig.token || !this.newApiConfig.endpointName) {
+        alert("Vul de API URL, Endpoint Naam en JWT Token in.");
         return;
     }
     this.apiService.updateConfig(this.newApiConfig);
@@ -1223,41 +1264,42 @@ export class App {
   }
 
   async loadAllData(forceReload = false) {
-      if (!this.apiConfig().token) return;
+      if (!this.apiConfig().token || !this.apiConfig().endpointName) return;
       
       this.isLoading.set(true);
       this.loadingMessage.set('Transacties en configuratie ophalen...');
       
       try {
         // 1. Transacties (type='transaction')
-        const txs = await this.apiService.getItems<Transaction>('transaction');
+        const txs = await this.apiService.getTransactions<Transaction>();
         this.transactions.set(txs);
 
-        // 2. Rules (type='rule')
-        const rules = await this.apiService.getItems<CategorizationRule>('rule');
+        // 2. Rules (type='config', subType='rule')
+        const rules = await this.apiService.getConfigItems<CategorizationRule>('rule');
         this.categorizationRules.set(rules);
 
-        // 3. Templates (type='mapping_template')
-        const templates = await this.apiService.getItems<CsvMappingTemplate>('mapping_template');
+        // 3. Templates (type='config', subType='mapping_template')
+        const templates = await this.apiService.getConfigItems<CsvMappingTemplate>('mapping_template');
         this.mappingTemplates.set(templates);
         
-        // 4. Account Names (type='account_names')
-        const accountRecord = await this.apiService.getItems<AccountNameRecord>('account_names');
+        // 4. Account Names (type='config', subType='account_names')
+        const accountRecord = await this.apiService.getConfigItems<AccountNameRecord>('account_names');
         this.accountNames.set(accountRecord[0]?.names || {});
         
-        // 5. Manual Categories (type='manual_categories')
-        const manualCatRecord = await this.apiService.getItems<ManualCategoryRecord>('manual_categories');
+        // 5. Manual Categories (type='config', subType='manual_categories')
+        const manualCatRecord = await this.apiService.getConfigItems<ManualCategoryRecord>('manual_categories');
         this.manualCategories.set(manualCatRecord[0]?.categories || []);
 
       } catch (e) {
         console.error('Fout bij het laden van data:', e);
-        alert(`Fout bij het synchroniseren met de API: ${e.message}. Controleer uw URL en Token.`);
+        alert(`Fout bij het synchroniseren met de API: ${e.message}. Controleer uw URL, Endpoint Naam en Token.`);
         this.apiConfig.update(c => ({...c, token: ''})); // Logisch uitloggen als API faalt
       } finally {
         this.isLoading.set(false);
       }
   }
   
+  // saveItem vereist nu dat T het type bevat
   async saveItem<T extends { type: string, id: string }>(item: T): Promise<T> {
       if (!this.apiConfig().token) throw new Error("API not configured");
       
@@ -1265,7 +1307,7 @@ export class App {
       this.loadingMessage.set(`Bezig met opslaan van ${item.type}...`);
       
       try {
-          if (item.id && item.id !== '') {
+          if (item.id && item.id !== 'local_temp_id') {
              return await this.apiService.updateItem(item);
           } else {
              const newItem = await this.apiService.addItem(item);
@@ -1304,17 +1346,17 @@ export class App {
   // Sla het AccountNames object op in de API
   async saveAccountNames() {
       const currentNames = this.accountNames();
-      const existingRecord = this.categorizationRules().find(r => r.type === 'account_names') as AccountNameRecord | undefined;
+      const existingRecord = this.categorizationRules().find(r => (r as any).subType === 'account_names') as AccountNameRecord | undefined;
       
       const record: AccountNameRecord = {
           id: existingRecord?.id || 'account_names_singleton', // Gebruik een vast ID voor dit singleton record
           names: currentNames,
-          type: 'account_names'
+          type: 'config',
+          subType: 'account_names'
       };
       
       try {
-          const savedRecord = await this.saveItem(record);
-          // Omdat dit een singleton is, hoeven we de accountNames signal niet bij te werken (het is al de lokale bron van waarheid)
+          await this.saveItem(record);
           alert("Rekeningnamen succesvol opgeslagen.");
       } catch (e) {
           // Foutmelding wordt al in saveItem gegeven
@@ -1359,12 +1401,13 @@ export class App {
   
   // Sla de handmatige categorielijst op in de API
   async saveManualCategories() {
-       const existingRecord = this.categorizationRules().find(r => r.type === 'manual_categories') as ManualCategoryRecord | undefined;
+       const existingRecord = this.categorizationRules().find(r => (r as any).subType === 'manual_categories') as ManualCategoryRecord | undefined;
       
        const record: ManualCategoryRecord = {
            id: existingRecord?.id || 'manual_categories_singleton',
            categories: this.manualCategories(),
-           type: 'manual_categories'
+           type: 'config',
+           subType: 'manual_categories'
        };
        
        return this.saveItem(record); // Retourneert Promise
@@ -1383,38 +1426,36 @@ export class App {
       const newCat = prompt(`Hernoem categorie "${oldCat}" naar:`);
       if (!newCat || newCat === oldCat) return;
       
-      // 1. Update Transacties
+      // 1. Update Transacties (Lokaal)
       const updatedTxs: Transaction[] = this.transactions().map(t => ({
           ...t,
           category: t.category === oldCat ? newCat : t.category
       }));
       this.transactions.set(updatedTxs);
 
-      // 2. Update Rules
+      // 2. Update Rules (Lokaal)
       const updatedRules: CategorizationRule[] = this.categorizationRules().map(r => ({
           ...r,
           category: r.category === oldCat ? newCat : r.category
       }));
       this.categorizationRules.set(updatedRules);
       
-      // 3. Update Manual Categories
+      // 3. Update Manual Categories (Lokaal)
       const updatedManualCats: string[] = this.manualCategories().map(cat => cat === oldCat ? newCat : cat).filter(c => c !== oldCat);
       this.manualCategories.set(updatedManualCats);
 
 
-      // 4. API Call: Update de gewijzigde rules, manual categories en transacties
+      // 4. API Call: Update de gewijzigde rules en manual categories
       try {
-          // Transacties updaten is te intensief in bulk. We laten dit lokaal, de 'id' blijft hetzelfde
-          
           // Update Rules in API
           await Promise.all(updatedRules
-              .filter(r => r.category === newCat) // Alleen degene die gewijzigd zijn
+              .filter(r => r.category === newCat && r.id !== 'local_temp_id') // Alleen degene die gewijzigd zijn en al in de API staan
               .map(r => this.saveItem(r)));
               
           // Update Manual Categories
           await this.saveManualCategories();
 
-          alert(`Categorie "${oldCat}" is hernoemd naar "${newCat}". Regels en handmatige lijst zijn bijgewerkt. Opmerking: de Transacties in de database worden bij de volgende save/delete bijgewerkt.`);
+          alert(`Categorie "${oldCat}" is hernoemd naar "${newCat}". Regels en handmatige lijst zijn bijgewerkt. Let op: Transacties in de database worden bij de volgende opslag/verwijdering bijgewerkt.`);
           
       } catch (e) {
           // In geval van fout: vraag de data opnieuw op
@@ -1433,8 +1474,8 @@ export class App {
       this.loadingMessage.set('Alle transacties permanent verwijderen...');
       
       try {
-          // De API Gateway ondersteunt bulk delete via query params (type=transaction)
-          await this.apiService.deleteBulk('type', 'transaction');
+          // Verwijdert ALLES met type='transaction'
+          await this.apiService.deleteBulk('transaction');
           this.transactions.set([]);
           alert("Alle transacties zijn gewist uit de API.");
       } catch (e) {
@@ -1449,8 +1490,6 @@ export class App {
 
   // --- AUTOMATIC CATEGORIZATION RULES ---
   
-  // Load Rules is nu onderdeel van loadAllData
-  
   async addRule() {
       if (!this.newRule.keyword || !this.newRule.category) {
           alert('Trefwoord en Categorie zijn verplicht.');
@@ -1460,7 +1499,8 @@ export class App {
           id: this.generateUUID(), // Eerst een lokaal ID
           keyword: this.newRule.keyword.toLowerCase().trim(), 
           category: this.newRule.category,
-          type: 'rule', // Voeg het API type toe
+          type: 'config', // Juiste API type
+          subType: 'rule', // Juiste API subType
           newDescription: this.newRule.newDescription?.trim() || undefined // Sla alleen op als ingevuld
       };
       
@@ -1523,7 +1563,7 @@ export class App {
 
       try {
           await Promise.all(transactionsToUpdate.map(t => 
-              // We gebruiken de normale saveTransaction logica, maar zonder de ID update (want die is al correct)
+              // We voegen het 'type' toe voor de API. Dit is puur voor de opslag
               this.apiService.updateItem({ ...t, type: 'transaction' }) 
           ));
           alert(`Regel succesvol toegepast: ${count} bestaande transacties bijgewerkt.`);
@@ -1572,8 +1612,6 @@ export class App {
   
   // --- TEMPLATE LOGIC ---
 
-  // Load Templates is nu onderdeel van loadAllData
-
   loadMappingTemplate(name: string) {
     if (!name) return;
     const template = this.mappingTemplates().find(t => t.name === name);
@@ -1607,7 +1645,8 @@ export class App {
     const newTemplate: CsvMappingTemplate = {
       id: id,
       name: name,
-      type: 'mapping_template',
+      type: 'config',
+      subType: 'mapping_template',
       ...this.csvMapping
     };
 
@@ -1949,8 +1988,7 @@ export class App {
   
   // Reload Data (voor stats tab als period verandert)
   reloadData() {
-      // In een echte app zouden we hier data ophalen op basis van de periode.
-      // Omdat we in deze implementatie alle transacties in het geheugen hebben (via loadAllData), is dit niet nodig.
+      // Data is in-memory geladen door loadAllData
   }
 
   // --- ACTIONS ---
@@ -2039,6 +2077,7 @@ export class App {
       try {
           // Update ze individueel via Promise.all
           await Promise.all(transactionsToUpdate.map(t => 
+              // We voegen het 'type' toe voor de API. Dit is puur voor de opslag
               this.apiService.updateItem({ ...t, type: 'transaction' }) 
           ));
           alert(`${transactionsToUpdate.length} transacties succesvol bijgewerkt in de API.`);
@@ -2085,7 +2124,7 @@ export class App {
 
   // CSV Import
   handleCsvFile(event: any) {
-    if (!this.apiConfig().token) {
+    if (!this.apiConfig().token || !this.apiConfig().endpointName) {
         alert("Stel eerst de API configuratie in op het tabblad 'Beheer'.");
         return;
     }
@@ -2236,7 +2275,7 @@ export class App {
 
   // Basic CRUD
   openModal(t?: Transaction) {
-    if (!this.apiConfig().token) {
+    if (!this.apiConfig().token || !this.apiConfig().endpointName) {
         alert("Stel eerst de API configuratie in op het tabblad 'Beheer'.");
         return;
     }
@@ -2380,7 +2419,7 @@ export class App {
 
   getEmptyTransaction(): Transaction { 
       return { 
-          id: '', 
+          id: this.generateUUID(), // Gebruik een lokaal ID totdat de API het echte MongoDB ID geeft
           date: new Date().toISOString().slice(0, 10), 
           description: '', 
           amount: 0, 
@@ -2406,11 +2445,12 @@ export class App {
   }
 
   // Backup (Lokaal)
-  // loadFromStorage en import/export van JSON/Dummy data blijft lokaal, maar werkt nu met de in-memory signals
   exportData() {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(this.transactions()));
     const a = document.createElement('a'); a.href = dataStr; a.download = "backup.json"; document.body.appendChild(a); a.click(); a.remove();
   }
+  
+  // Import van JSON: Verwijder ALLES ('config' en 'transaction') en upload de backup als transacties
   importJson(e: any) {
       const f = e.target.files[0]; if(!f) return;
       const r = new FileReader(); 
@@ -2421,9 +2461,12 @@ export class App {
               
               const importedTxs: Transaction[] = JSON.parse(ev.target.result);
               
-              // Verwijder eerst alle bestaande transacties
-              this.apiService.deleteBulk('type', 'transaction').then(() => {
-                 // Upload de nieuwe
+              // Verwijder eerst alle bestaande data (zowel transacties als configuratie)
+              Promise.all([
+                  this.apiService.deleteBulk('transaction'),
+                  this.apiService.deleteBulk('config')
+              ]).then(() => {
+                 // Upload de nieuwe transacties
                  return Promise.all(importedTxs.map(tx => {
                      // Zorg dat ze het API type hebben en een nieuwe lokale ID voor de POST
                      (tx as any).type = 'transaction';
@@ -2477,31 +2520,31 @@ export class App {
     
     // 2. Genereer dummy regels en configuratie
     const dummyRules: CategorizationRule[] = [
-        { id: this.generateUUID(), keyword: 'albert heijn', category: 'Boodschappen', type: 'rule' },
-        { id: this.generateUUID(), keyword: 'netflix', category: 'Abonnementen', newDescription: 'Netflix Abonnement', type: 'rule' },
-        { id: this.generateUUID(), keyword: 'ns', category: 'Vervoer', type: 'rule' },
+        { id: this.generateUUID(), keyword: 'albert heijn', category: 'Boodschappen', type: 'config', subType: 'rule' },
+        { id: this.generateUUID(), keyword: 'netflix', category: 'Abonnementen', newDescription: 'Netflix Abonnement', type: 'config', subType: 'rule' },
+        { id: this.generateUUID(), keyword: 'ns', category: 'Vervoer', type: 'config', subType: 'rule' },
     ];
     
     const dummyAccountNames: AccountNameRecord = {
         id: 'account_names_singleton',
         names: { 'NL01BANK0123456789': 'Betaalrekening', 'NL99SPAR9876543210': 'Spaarrekening' },
-        type: 'account_names'
+        type: 'config',
+        subType: 'account_names'
     };
     
     const dummyManualCats: ManualCategoryRecord = {
         id: 'manual_categories_singleton',
         categories: ['Vrije tijd', 'Cadeaus', 'Vakantie'],
-        type: 'manual_categories'
+        type: 'config',
+        subType: 'manual_categories'
     };
 
     // 3. Verwijder bestaande data en upload de nieuwe
     try {
+        // Verwijder transacties en de gehele configuratie bulk
         await Promise.all([
-            this.apiService.deleteBulk('type', 'transaction'),
-            this.apiService.deleteBulk('type', 'rule'),
-            this.apiService.deleteBulk('type', 'mapping_template'),
-            this.apiService.deleteBulk('type', 'account_names'),
-            this.apiService.deleteBulk('type', 'manual_categories'),
+            this.apiService.deleteBulk('transaction'),
+            this.apiService.deleteBulk('config'),
         ]);
 
         // Upload de nieuwe data (alles in één batch)
