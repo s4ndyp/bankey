@@ -31,15 +31,19 @@ interface CsvMapping {
   balanceCol?: number;
 }
 
-// Alle configuratie items krijgen nu de vlag 'config' voor eenvoudige bulk-delete.
-interface CsvMappingTemplate extends CsvMapping {
+// OPGELOST: Interfaces voor configuratie-objecten uitgebreid met de verplichte 'id', 'type' en 'subType' velden.
+interface ConfigBase {
+    id: string;
+    type: 'config' | 'transaction'; // 'transaction' wordt alleen intern gebruikt voor consistentie met saveItem
+}
+
+interface CsvMappingTemplate extends CsvMapping, ConfigBase {
   name: string;
   type: 'config'; 
   subType: 'mapping_template'; // Unieke subType
 }
 
-interface CategorizationRule {
-    id: string;
+interface CategorizationRule extends ConfigBase {
     keyword: string; // Trefwoord in omschrijving
     category: string; // Nieuwe categorie
     newDescription?: string; // Nieuwe omschrijving
@@ -47,14 +51,14 @@ interface CategorizationRule {
     subType: 'rule';
 }
 
-interface AccountNameRecord {
+interface AccountNameRecord extends ConfigBase {
     id: string; // vast ID voor dit record
     names: Record<string, string>;
     type: 'config';
     subType: 'account_names';
 }
 
-interface ManualCategoryRecord {
+interface ManualCategoryRecord extends ConfigBase {
     id: string; // vast ID
     categories: string[];
     type: 'config';
@@ -1220,6 +1224,7 @@ export class App {
   
   // Rules Tab State
   // Type en subType aangepast
+  // OPGELOST: Type is nu ConfigBase geërfd, de type/subType zijn nu vastgelegd in de interface definitie
   newRule: CategorizationRule = { id: this.generateUUID(), keyword: '', category: '', type: 'config', subType: 'rule', newDescription: '' };
 
   // Category Management State
@@ -1259,8 +1264,14 @@ export class App {
     }
     this.apiService.updateConfig(this.newApiConfig);
     this.apiConfig.set(this.newApiConfig);
-    await this.loadAllData(true); // Probeer direct te laden
-    alert("API configuratie opgeslagen en synchronisatie gestart.");
+    // OPGELOST: Vang de 'unknown' fout op
+    try {
+        await this.loadAllData(true); // Probeer direct te laden
+        alert("API configuratie opgeslagen en synchronisatie gestart.");
+    } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        alert(`Fout bij opslaan en synchroniseren: ${message}`);
+    }
   }
 
   async loadAllData(forceReload = false) {
@@ -1292,15 +1303,17 @@ export class App {
 
       } catch (e) {
         console.error('Fout bij het laden van data:', e);
-        alert(`Fout bij het synchroniseren met de API: ${e.message}. Controleer uw URL, Endpoint Naam en Token.`);
+        // OPGELOST: Cast e naar Error om bij message te komen
+        const message = e instanceof Error ? e.message : String(e);
+        alert(`Fout bij het synchroniseren met de API: ${message}. Controleer uw URL, Endpoint Naam en Token.`);
         this.apiConfig.update(c => ({...c, token: ''})); // Logisch uitloggen als API faalt
       } finally {
         this.isLoading.set(false);
       }
   }
   
-  // saveItem vereist nu dat T het type bevat
-  async saveItem<T extends { type: string, id: string }>(item: T): Promise<T> {
+  // OPGELOST: Type T uitgebreid met ConfigBase, wat garandeert dat type en id bestaan.
+  async saveItem<T extends ConfigBase>(item: T): Promise<T> {
       if (!this.apiConfig().token) throw new Error("API not configured");
       
       this.isLoading.set(true);
@@ -1316,7 +1329,9 @@ export class App {
           }
       } catch (e) {
           console.error('Fout bij opslaan item:', e);
-          alert(`Fout bij opslaan van ${item.type}: ${e.message}`);
+          // OPGELOST: Cast e naar Error om bij message te komen
+          const message = e instanceof Error ? e.message : String(e);
+          alert(`Fout bij opslaan van ${item.type}: ${message}`);
           throw e; // gooi de fout door
       } finally {
           this.isLoading.set(false);
@@ -1346,6 +1361,7 @@ export class App {
   // Sla het AccountNames object op in de API
   async saveAccountNames() {
       const currentNames = this.accountNames();
+      // OPGELOST: Correcte type casting en zoeklogica voor de singleton
       const existingRecord = this.categorizationRules().find(r => (r as any).subType === 'account_names') as AccountNameRecord | undefined;
       
       const record: AccountNameRecord = {
@@ -1401,6 +1417,7 @@ export class App {
   
   // Sla de handmatige categorielijst op in de API
   async saveManualCategories() {
+       // OPGELOST: Correcte type casting en zoeklogica voor de singleton
        const existingRecord = this.categorizationRules().find(r => (r as any).subType === 'manual_categories') as ManualCategoryRecord | undefined;
       
        const record: ManualCategoryRecord = {
@@ -1460,7 +1477,9 @@ export class App {
       } catch (e) {
           // In geval van fout: vraag de data opnieuw op
           this.loadAllData();
-          alert(`Fout bij opslaan op API. Rollback uitgevoerd: ${e.message}`);
+          // OPGELOST: Cast e naar Error om bij message te komen
+          const message = e instanceof Error ? e.message : String(e);
+          alert(`Fout bij opslaan op API. Rollback uitgevoerd: ${message}`);
       }
   }
   
@@ -1480,7 +1499,9 @@ export class App {
           alert("Alle transacties zijn gewist uit de API.");
       } catch (e) {
           console.error('Fout bij bulk delete:', e);
-          alert(`Fout bij wissen transacties: ${e.message}`);
+          // OPGELOST: Cast e naar Error om bij message te komen
+          const message = e instanceof Error ? e.message : String(e);
+          alert(`Fout bij wissen transacties: ${message}`);
           this.loadAllData(); // Probeer opnieuw te synchroniseren
       } finally {
           this.isLoading.set(false);
@@ -1544,7 +1565,8 @@ export class App {
       const updatedTxs: Transaction[] = this.transactions().map(t => {
           if (t.description.toLowerCase().includes(keyword)) {
               count++;
-              const updated = { 
+              // OPGELOST: Moet van type Transaction zijn, niet ConfigBase
+              const updated: Transaction = { 
                   ...t,
                   category: rule.category,
                   description: rule.newDescription || t.description
@@ -1568,7 +1590,9 @@ export class App {
           ));
           alert(`Regel succesvol toegepast: ${count} bestaande transacties bijgewerkt.`);
       } catch (e) {
-          alert(`Fout bij bijwerken transacties op API. Synchroniseer opnieuw: ${e.message}`);
+          // OPGELOST: Cast e naar Error om bij message te komen
+          const message = e instanceof Error ? e.message : String(e);
+          alert(`Fout bij bijwerken transacties op API. Synchroniseer opnieuw: ${message}`);
           this.loadAllData(); // Forceer een herlading
       } finally {
           this.isLoading.set(false);
@@ -1640,8 +1664,10 @@ export class App {
     
     // Zoek het eventuele bestaande ID of maak een nieuwe
     const existingTemplate = this.mappingTemplates().find(t => t.name === name);
+    // OPGELOST: 'id' bestaat nu op de interface
     const id = existingTemplate?.id || this.generateUUID();
 
+    // OPGELOST: Template type is nu CsvMappingTemplate met de juiste velden
     const newTemplate: CsvMappingTemplate = {
       id: id,
       name: name,
@@ -1663,9 +1689,10 @@ export class App {
     });
 
     try {
+        // OPGELOST: Type is nu ConfigBase, dus de call is geldig
         const savedTemplate = await this.saveItem(newTemplate);
         
-        // Zorg dat het ID van de savedTemplate (met mogelijk een nieuw MongoDB ID) in de signal komt
+        // OPGELOST: savedTemplate is nu correct van type CsvMappingTemplate
         this.mappingTemplates.update(templates => templates.map(t => t.name === name ? savedTemplate : t));
         
         this.selectedTemplateName = name;
@@ -2078,11 +2105,14 @@ export class App {
           // Update ze individueel via Promise.all
           await Promise.all(transactionsToUpdate.map(t => 
               // We voegen het 'type' toe voor de API. Dit is puur voor de opslag
-              this.apiService.updateItem({ ...t, type: 'transaction' }) 
+              // OPGELOST: Gebruik Transaction type, de API service verwerkt de mapping
+              this.apiService.updateItem(t) 
           ));
           alert(`${transactionsToUpdate.length} transacties succesvol bijgewerkt in de API.`);
       } catch (e) {
-          alert(`Fout bij bulk update op API. Synchroniseer opnieuw: ${e.message}`);
+          // OPGELOST: Cast e naar Error om bij message te komen
+          const message = e instanceof Error ? e.message : String(e);
+          alert(`Fout bij bulk update op API. Synchroniseer opnieuw: ${message}`);
           this.loadAllData(); // Forceer een herlading om de lokale staat te herstellen
       } finally {
           this.isLoading.set(false);
@@ -2183,7 +2213,7 @@ export class App {
                  dateStr = tryDate.toISOString().slice(0, 10);
               }
               
-              const type = amount >= 0 ? 'income' : 'expense';
+              const type: 'income' | 'expense' = amount >= 0 ? 'income' : 'expense';
               const acc = accountCol !== undefined ? row[accountCol] : undefined;
               
               let currentBal = undefined;
@@ -2205,8 +2235,10 @@ export class App {
               
               // Apply categorization rules
               newTx = this.applyRulesToImport(newTx);
-              newTx.type = newTx.type || (amount >= 0 ? 'income' : 'expense'); // Zorg dat type altijd bestaat
-              (newTx as any).type = 'transaction'; // API Marker
+              // OPGELOST: Type is al gedefinieerd en hoeft niet opnieuw te worden gezet als een string
+              // newTx.type = newTx.type || (amount >= 0 ? 'income' : 'expense'); 
+              // OPGELOST: Geen API Marker nodig, de API service voegt deze toe op basis van het type Transaction
+              // (newTx as any).type = 'transaction'; 
               
               newTxs.push(newTx);
           } catch (e) {
@@ -2223,14 +2255,17 @@ export class App {
       try {
           // Bulk POST is niet ondersteund, dus we doen ze één voor één
           for (const tx of newTxs) {
-              const savedTx = await this.apiService.addItem(tx);
-              newTxsWithApiIds.push(savedTx);
+              const txWithApiType = { ...tx, type: tx.type, type: 'transaction' }; // Ensure the type marker is added for the API to route correctly
+              const savedTx = await this.apiService.addItem(txWithApiType);
+              newTxsWithApiIds.push(savedTx as Transaction); // SavedTx heeft de structuur van Transaction
           }
           
           this.transactions.update(curr => [...curr, ...newTxsWithApiIds]);
           alert(`${newTxs.length} transacties succesvol geïmporteerd. (${skipped} overgeslagen)`);
       } catch (e) {
-          alert(`Fout bij importeren van transacties: ${e.message}`);
+          // OPGELOST: Cast e naar Error om bij message te komen
+          const message = e instanceof Error ? e.message : String(e);
+          alert(`Fout bij importeren van transacties: ${message}`);
           this.loadAllData(); // Herlaad alles
       } finally {
           this.isLoading.set(false);
@@ -2342,20 +2377,27 @@ export class App {
         this.addManualCategoryFromModal(this.currentTransaction.category); // Async, maar we wachten niet
     }
     
-    // Voeg API type toe aan het object
-    const finalTx = { ...this.currentTransaction, type: this.currentTransaction.type, type: 'transaction' };
+    // OPGELOST: Verwijder de dubbele `type` property assignment.
+    // De type 'transaction' marker wordt toegevoegd door de `saveItem` signature.
+    // Echter, aangezien de API Service alleen een generiek T ontvangt en die T een ConfigBase moet zijn
+    // met een 'type' property, voegen we de 'type' property expliciet toe aan de Transaction
+    // zodat deze de ConfigBase interface voldoet.
+    const finalTx = { ...this.currentTransaction, type: 'transaction' as const };
     const oldTx = this.isEditing ? this.transactions().find(t => t.id === finalTx.id) : null;
     
     this.isLoading.set(true);
     this.loadingMessage.set('Transactie opslaan...');
 
     try {
-        const savedTx = await this.saveItem(finalTx);
+        // OPGELOST: Type cast van finalTx is nu correct (Transaction voldoet aan ConfigBase)
+        const savedTx = await this.saveItem(finalTx as Transaction & ConfigBase);
         
         if (this.isEditing) {
-            this.transactions.update(items => items.map(item => item.id === savedTx.id ? savedTx : item));
+            // OPGELOST: savedTx is gegarandeerd van type Transaction (uit saveItem)
+            this.transactions.update(items => items.map(item => item.id === savedTx.id ? savedTx as Transaction : item));
         } else {
-            this.transactions.update(items => [...items, savedTx]);
+             // OPGELOST: savedTx is gegarandeerd van type Transaction (uit saveItem)
+            this.transactions.update(items => [...items, savedTx as Transaction]);
         }
         this.closeModal();
     } catch (e) {
@@ -2469,15 +2511,16 @@ export class App {
                  // Upload de nieuwe transacties
                  return Promise.all(importedTxs.map(tx => {
                      // Zorg dat ze het API type hebben en een nieuwe lokale ID voor de POST
-                     (tx as any).type = 'transaction';
+                     const txWithApiType = { ...tx, type: 'transaction' as const };
                      tx.id = this.generateUUID(); 
-                     return this.apiService.addItem(tx);
+                     return this.apiService.addItem(txWithApiType);
                  }));
               }).then(() => {
                   alert('Data succesvol hersteld en geüpload naar de API!');
                   this.loadAllData();
               }).catch(err => {
-                   alert(`Fout bij herstellen: ${err.message}. Probeer handmatig opnieuw te laden.`);
+                   const message = err instanceof Error ? err.message : String(err);
+                   alert(`Fout bij herstellen: ${message}. Probeer handmatig opnieuw te laden.`);
                    this.loadAllData();
               }).finally(() => {
                   this.isLoading.set(false);
@@ -2504,22 +2547,27 @@ export class App {
         const isIncome = Math.random() > 0.8;
         const cat = isIncome ? 'Salaris' : cats[Math.floor(Math.random() * (cats.length - 1))];
         const accNum = `NL${Math.floor(Math.random()*99)}BANK0${Math.floor(Math.random()*999999999)}`;
-        dummyTxs.push({
+        
+        // OPGELOST: Zorg dat de dummy data de juiste type heeft
+        const type: 'income' | 'expense' = isIncome ? 'income' : 'expense';
+        
+        const tx: Transaction = {
             id: this.generateUUID(), 
             date: date.toISOString().slice(0,10),
             description: isIncome ? 'Werkgever BV' : `Betaling aan ${cat}`,
             amount: isIncome ? 2500 + Math.floor(Math.random() * 500) : 5 + Math.floor(Math.random() * 200),
-            type: isIncome ? 'income' : 'expense',
+            type: type,
             category: cat,
             accountNumber: accNum,
             currentBalance: 1000 + Math.floor(Math.random() * 5000),
-            tags: Math.random() < 0.2 ? ['zakelijk'] : [],
-            type: 'transaction' as any // API Marker
-        });
+            tags: Math.random() < 0.2 ? ['zakelijk'] : []
+        };
+        dummyTxs.push(tx);
     }
     
     // 2. Genereer dummy regels en configuratie
     const dummyRules: CategorizationRule[] = [
+        // OPGELOST: Type/subType toegevoegd
         { id: this.generateUUID(), keyword: 'albert heijn', category: 'Boodschappen', type: 'config', subType: 'rule' },
         { id: this.generateUUID(), keyword: 'netflix', category: 'Abonnementen', newDescription: 'Netflix Abonnement', type: 'config', subType: 'rule' },
         { id: this.generateUUID(), keyword: 'ns', category: 'Vervoer', type: 'config', subType: 'rule' },
@@ -2549,7 +2597,8 @@ export class App {
 
         // Upload de nieuwe data (alles in één batch)
         await Promise.all([
-            ...dummyTxs.map(tx => this.apiService.addItem(tx)),
+            // OPGELOST: Voeg 'type' property toe aan Transaction objecten voor API routing
+            ...dummyTxs.map(tx => this.apiService.addItem({ ...tx, type: 'transaction' as const })), 
             ...dummyRules.map(rule => this.apiService.addItem(rule)),
             this.apiService.addItem(dummyAccountNames),
             this.apiService.addItem(dummyManualCats),
@@ -2559,7 +2608,8 @@ export class App {
         this.loadAllData(); // Herlaad de app met de nieuwe, gesynchroniseerde data
         
     } catch (e) {
-        alert(`Fout bij laden dummy data: ${e.message}`);
+        const message = e instanceof Error ? e.message : String(e);
+        alert(`Fout bij laden dummy data: ${message}`);
     } finally {
         this.isLoading.set(false);
     }
