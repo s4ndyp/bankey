@@ -824,7 +824,7 @@ export class App {
     return all.filter(t => new Date(t.date) >= cutoff);
   });
 
-  // CHANGED: Bar chart is now Category based
+  // Bar chart is Category based
   barChartData = computed(() => {
     const txs = this.statsFilteredData().filter(t => t.type === 'expense');
     const buckets = new Map<string, number>(); 
@@ -858,7 +858,7 @@ export class App {
       return Math.max(...data.map(d => (d.value / d.pct) * 100), 100);
   }
 
-  // Updated Line Chart Data with smart grouping
+  // UPDATED: Line Chart Data now prioritizes currentBalance
   lineChartData = computed(() => {
     const txs = this.statsFilteredData();
     const sortedTxs = [...txs].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
@@ -878,33 +878,36 @@ export class App {
       return `${d.getFullYear()}-W${weekNo}`;
     };
 
-    // 2. Calculate Cumulative Balance History
-    // We need to process ALL transactions up to the current sorted set to get starting balance
-    // For simplicity, we start at 0 relative to the period start or just show change.
-    // Let's show cumulative change within period to be safe.
-    
+    // 2. Extract Balance or Calculate Cumulative Change
     const buckets = new Map<string, number>(); 
     let cumulative = 0;
-    
-    // Initialize buckets based on date? No, just iterate transactions.
-    sortedTxs.forEach(t => {
-      const change = t.type === 'income' ? t.amount : -t.amount;
-      cumulative += change;
-      
-      const key = getGroupKey(t.date);
-      // We overwrite the bucket with the LATEST cumulative value for that period
-      buckets.set(key, cumulative);
-    });
+    let hasBalanceData = sortedTxs.some(t => t.currentBalance !== undefined);
 
+    sortedTxs.forEach(t => {
+        const key = getGroupKey(t.date);
+
+        if (hasBalanceData && t.currentBalance !== undefined) {
+            // Use the explicit balance field if available
+            buckets.set(key, t.currentBalance);
+        } else if (!hasBalanceData) {
+            // Fallback: Calculate cumulative change
+            const change = t.type === 'income' ? t.amount : -t.amount;
+            cumulative += change;
+            buckets.set(key, cumulative);
+        }
+        // If hasBalanceData is true but t.currentBalance is undefined, we skip this point, 
+        // assuming the balance data is sparse or incomplete.
+    });
+    
     // 3. Convert to points
     const points: {x: number, y: number, label: string, value: number}[] = [];
-    const keys = Array.from(buckets.keys()); // These are already roughly sorted by time if transactions were sorted
+    const keys = Array.from(buckets.keys()); 
 
-    keys.forEach((key, index) => {
+    keys.forEach((key) => {
         let label = key;
-        if (key.includes('-W')) label = key.split('-')[1]; // W34
-        else if (key.length === 10) label = key.slice(5); // MM-DD
-        else if (key.length === 7) label = key.slice(5); // MM
+        if (key.includes('-W')) label = key.split('-')[1]; 
+        else if (key.length === 10) label = key.slice(5); 
+        else if (key.length === 7) label = key.slice(5); 
 
         points.push({
             x: 0, 
@@ -915,6 +918,12 @@ export class App {
     });
 
     if (points.length === 0) return [];
+    
+    // Sort points by date (key) to ensure they are chronological
+    points.sort((a, b) => {
+        // Simple comparison of keys (YYYY-MM-DD or YYYY-WXX) works for chronology
+        return a.label.localeCompare(b.label);
+    });
 
     const minVal = Math.min(0, ...points.map(p => p.value));
     const maxVal = Math.max(0, ...points.map(p => p.value));
@@ -1263,8 +1272,8 @@ export class App {
     const a = document.createElement('a'); a.href = dataStr; a.download = "backup.json"; document.body.appendChild(a); a.click(); a.remove();
   }
   importJson(e: any) {
-      const f = e.target.files[0]; if(!f) return;
-      const r = new FileReader(); r.onload = (ev: any) => { this.transactions.set(JSON.parse(ev.target.result)); alert('Hersteld!'); }; r.readAsText(f);
+      f = e.target.files[0]; if(!f) return;
+      r = new FileReader(); r.onload = (ev: any) => { this.transactions.set(JSON.parse(ev.target.result)); alert('Hersteld!'); }; r.readAsText(f);
   }
   loadDummyData() {
     const cats = ['Boodschappen', 'Huur', 'Salaris', 'Verzekering', 'Uit eten', 'Vervoer', 'Abonnementen', 'Kleding'];
